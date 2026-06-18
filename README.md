@@ -56,30 +56,45 @@ extra = ["bash"]             # 额外 session（系统自动扫描 .desktop）
 
 [branding]
 title = "gtlx's machine"    # 标题
+
+[theme]
+title = "cyan bold"          # 标题样式
+sep = ""                     # 分隔线样式
+plugin = "green"             # 插件输出样式
+label = "yellow"             # 提示文字样式
+input = "white"              # 输入文字样式
+error = "red bold"           # 错误提示样式
+session = "white"            # session 列表样式
+session_default = "cyan"     # 默认 session 样式
+select = "yellow"            # 选择提示样式
 ```
+
+### 支持的颜色和属性
+
+**颜色：** `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`
+**亮色：** `bright_black`, `bright_red`, `bright_green`, `bright_yellow`, `bright_blue`, `bright_magenta`, `bright_cyan`, `bright_white`
+**属性：** `bold`, `dim`, `italic`, `underline`, `blink`, `reverse`
+
+组合写法：`"cyan bold"`, `"yellow underline"`, `"bright_white bold"`
 
 ## 插件
 
-插件是可执行文件，放在以下目录：
+插件是在登录界面**启动时执行一次**的可执行文件，输出内容会显示在标题下方。
 
-| 目录 | 说明 |
-|------|------|
-| `~/.config/my-greeter/plugins/` | 用户插件（推荐） |
-| 脚本同目录的 `plugins/` | 项目自带插件 |
+### 插件协议
 
-插件**启动时执行一次**，将自己的输出行通过 JSON 格式打印到 stdout：
+插件**启动时往 stdout 输出一行 JSON**：
 
 ```json
-{"name":"clock","lines":["14:30:00"]}
+{"name":"插件名","lines":["第一行","第二行"]}
 ```
 
-可以**用任何语言写**——shell、Python、Rust、Go 都行。
-
-### 示例：shell 插件（~/.config/my-greeter/plugins/clock.sh）
+### 示例：shell 插件
 
 ```bash
 #!/bin/bash
-echo "{\"name\":\"clock\",\"lines\":[\"$(date '+%H:%M:%S')\"]}"
+# ~/.config/my-greeter/plugins/clock.sh
+echo '{"name":"clock","lines":["'$(date '+%H:%M:%S')'"]}'
 ```
 
 ### 示例：Python 插件
@@ -88,29 +103,29 @@ echo "{\"name\":\"clock\",\"lines\":[\"$(date '+%H:%M:%S')\"]}"
 #!/usr/bin/env python3
 import json
 from datetime import datetime
-print(json.dumps({"name": "clock", "lines": [datetime.now().strftime("%H:%M:%S")]}))
+print(json.dumps({"name":"clock","lines":[datetime.now().strftime("%H:%M:%S")]}))
 ```
 
-### 示例：随意写
+### 示例：Rust / Go / C / 任意语言
 
-```bash
-#!/bin/bash
-# 显示昨天吃了什么
-echo '{"name":"memory","lines":["昨晚上吃的火锅"]}'
-```
+只要能生成可执行文件、输出一行 JSON 到 stdout 就行。
 
-装一个插件就是复制文件 + 加可执行权限：
+### 插件目录
+
+| 目录 | 说明 |
+|------|------|
+| `~/.config/my-greeter/plugins/` | 用户自己的插件 |
+| 脚本同目录下的 `plugins/` | 项目自带的示例插件 |
+
+### 安装插件
 
 ```bash
 cp my-plugin.sh ~/.config/my-greeter/plugins/
 chmod +x ~/.config/my-greeter/plugins/my-plugin.sh
-```
-
-重启 greetd 看效果：
-
-```bash
 sudo systemctl restart greetd
 ```
+
+插件出错（超时、非 JSON、返回值非 0）会被**静默跳过**，不影响登录。
 
 ## 原理
 

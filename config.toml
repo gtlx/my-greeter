@@ -11,3 +11,14 @@ auto_login = false
 
 [branding]
 title = "gtlx's machine"
+
+[theme]
+title = "cyan bold"
+sep = ""
+plugin = "green"
+label = "yellow"
+input = "white"
+error = "red bold"
+session = "white"
+session_default = "cyan"
+select = "yellow"

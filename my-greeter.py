@@ -53,6 +53,81 @@ def load_config() -> dict:
     return DEFAULT_CONFIG
 
 
+# ─── 主题系统 ──────────────────────────────────────────
+
+ANSI_COLORS = {
+    "black": 30,
+    "red": 31,
+    "green": 32,
+    "yellow": 33,
+    "blue": 34,
+    "magenta": 35,
+    "cyan": 36,
+    "white": 37,
+    "bright_black": 90,
+    "bright_red": 91,
+    "bright_green": 92,
+    "bright_yellow": 93,
+    "bright_blue": 94,
+    "bright_magenta": 95,
+    "bright_cyan": 96,
+    "bright_white": 97,
+}
+
+ANSI_ATTRS = {
+    "bold": 1,
+    "dim": 2,
+    "italic": 3,
+    "underline": 4,
+    "blink": 5,
+    "reverse": 7,
+}
+
+RESET = "\033[0m"
+
+
+def parse_style(style_str: str) -> str:
+    """
+    解析样式字符串，返回 ANSI 转义码。
+    例如: "cyan bold" → "\033[36;1m"
+          "red"       → "\033[31m"
+          ""          → ""（空白/不配置就无色）
+    """
+    if not style_str or not style_str.strip():
+        return ""
+    parts = style_str.strip().lower().split()
+    codes = []
+    for p in parts:
+        if p in ANSI_COLORS:
+            codes.append(str(ANSI_COLORS[p]))
+        elif p in ANSI_ATTRS:
+            codes.append(str(ANSI_ATTRS[p]))
+    if not codes:
+        return ""
+    return "\033[" + ";".join(codes) + "m"
+
+
+def styled(text: str, style: str) -> str:
+    """给文本套上样式，如果 style 为空就原样返回"""
+    ansi = parse_style(style)
+    if not ansi:
+        return text
+    return ansi + text + RESET
+
+
+DEFAULT_THEME = {
+    "title": "cyan bold",
+    "sep": "",
+    "plugin": "green",
+    "label": "yellow",
+    "input": "white",
+    "error": "red bold",
+    "session": "white",
+    "session_default": "cyan",
+    "select": "yellow",
+}
+
+
 # ─── 自动检测桌面环境 ──────────────────────────────────
 
 def scan_sessions() -> list[dict]:
@@ -156,16 +231,16 @@ def load_plugins() -> list[str]:
                     if "lines" in data:
                         plugin_lines.extend(data["lines"])
             except (TimeoutExpired, CalledProcessError, json.JSONDecodeError, OSError):
-                continue  # 插件出错就跳过，不阻塞
+                continue
     return plugin_lines
 
 
-# ─── 终端居中工具 ──────────────────────────────────────
+# ─── 终端工具 ──────────────────────────────────────────
 
-def center_print(text: str, width: int):
-    """居中打印一行文本"""
+def center_print(text: str, width: int, style: str = ""):
+    """居中打印一行文本（可选 ANSI 样式）"""
     padding = max(0, (width - len(text)) // 2)
-    print(" " * padding + text)
+    print(" " * padding + styled(text, style))
 
 
 def clear_screen():
@@ -231,42 +306,35 @@ class GreetdClient:
         self.sock.close()
 
 
-# ─── TUI（居中登录界面）────────────────────────────────
+# ─── TUI（居中 + 主题登录界面）─────────────────────────
 
 def tui_login(config: dict):
     columns, lines = shutil.get_terminal_size()
     auth_cfg = config["auth"]
     sessions = config["sessions"]
     brand = config["branding"]
+    theme = {**DEFAULT_THEME, **(config.get("theme") or {})}
 
     # 加载插件
     plugin_lines = load_plugins()
 
-    # 标题行
     title = f"  {brand['title']}"
     sep = f"  {'─' * len(brand['title'])}"
 
     # 计算界面总行数
-    # +2: 标题上下各一个空行
-    ui_height = 2 + 2 + 1 + (1 if plugin_lines else 0) + len(plugin_lines)
-    # +1: 输入行
-    ui_height += 1
+    ui_height = 2 + 2 + 1 + (1 if plugin_lines else 0) + len(plugin_lines) + 1
     top_padding = max(0, (lines - ui_height) // 2)
 
     clear_screen()
-
-    # 垂直居中
     print("\n" * top_padding, end="")
 
-    # 水平居中
-    center_print(title, columns)
-    center_print(sep, columns)
+    center_print(title, columns, theme["title"])
+    center_print(sep, columns, theme["sep"])
 
-    # 插件输出行
     if plugin_lines:
         print()
         for line in plugin_lines:
-            center_print(f"  {line}", columns)
+            center_print(f"  {line}", columns, theme["plugin"])
 
     print()
 
@@ -274,12 +342,16 @@ def tui_login(config: dict):
     default_user = auth_cfg.get("default_user", "")
     if auth_cfg.get("auto_login") and default_user:
         username = default_user
-        print(f"{' ' * ((columns - len(f'  User: {username}')) // 2)}  User: {username}")
+        label = styled("  User:", theme["label"])
+        value = styled(f" {username}", theme["input"])
+        text = label + value
+        offset = max(0, (columns - len("  User: ") - len(username)) // 2)
+        print(" " * offset + text)
     else:
-        prompt = f"  User{f' [{default_user}]' if default_user else ''}: "
-        # 将光标移到居中位置再输入
-        offset = (columns - len(prompt)) // 2
-        sys.stdout.write(" " * offset + prompt)
+        prompt_text = f"  User{f' [{default_user}]' if default_user else ''}: "
+        styled_prompt = styled(prompt_text, theme["label"])
+        offset = max(0, (columns - len(prompt_text)) // 2)
+        sys.stdout.write(" " * offset + styled_prompt)
         sys.stdout.flush()
         raw = input().strip()
         username = raw if raw else default_user
@@ -289,37 +361,37 @@ def tui_login(config: dict):
 
     # 连接 greetd
     client = GreetdClient()
-
-    # create_session 已消费第一个响应，直接进入认证循环
     resp = client.create_session(username)
 
     while resp["type"] != "success":
         if resp["type"] == "auth_message":
             msg_type = resp.get("auth_message_type", "visible")
             msg_text = resp.get("auth_message", "")
-            prompt_centered = " " * ((columns - len(f"  {msg_text}")) // 2)
+            padded_msg = f"  {msg_text}"
+            styled_msg = styled(padded_msg, theme["label"])
+            offset = max(0, (columns - len(padded_msg)) // 2)
             if msg_type == "secret":
                 from getpass import getpass
-                sys.stdout.write(prompt_centered + f"  {msg_text}")
+                sys.stdout.write(" " * offset + styled_msg)
                 sys.stdout.flush()
                 answer = getpass("")
             elif msg_type in ("info", "error"):
-                center_print(f"  [{msg_type}] {msg_text}", columns)
+                stl = theme["error"] if msg_type == "error" else theme["label"]
+                center_print(f"  [{msg_type}] {msg_text}", columns, stl)
                 resp = client.post_auth_response()
                 continue
             else:
-                answer = input(prompt_centered + f"  {msg_text}")
+                answer = input(" " * offset + styled_msg)
             resp = client.post_auth_response(answer)
         elif resp["type"] == "error":
-            center_print(f"  Error: {resp.get('description', 'unknown')}", columns)
+            center_print(f"  Error: {resp.get('description', 'unknown')}", columns, theme["error"])
             client.close()
             return
 
     # 选择 session
     session_list = merge_sessions(sessions)
-
     if not session_list:
-        center_print("  No sessions available", columns)
+        center_print("  No sessions available", columns, theme["error"])
         client.close()
         return
 
@@ -330,16 +402,18 @@ def tui_login(config: dict):
             break
 
     print()
-    center_print("Sessions:", columns)
+    center_print("Sessions:", columns, theme["label"])
     for i, s in enumerate(session_list, 1):
         marker = " <" if s.get("default") else ""
         tag = f" [{s.get('type', '?')}]"
         text = f"  {i}. {s['name']}{tag}{marker}"
-        center_print(text, columns)
+        stl = theme["session_default"] if s.get("default") else theme["session"]
+        center_print(text, columns, stl)
 
-    prompt = f"  Select [1-{len(session_list)}] ({default_idx + 1}): "
-    offset = (columns - len(prompt)) // 2
-    sys.stdout.write(" " * offset + prompt)
+    prompt_text = f"  Select [1-{len(session_list)}] ({default_idx + 1}): "
+    styled_prompt = styled(prompt_text, theme["select"])
+    offset = max(0, (columns - len(prompt_text)) // 2)
+    sys.stdout.write(" " * offset + styled_prompt)
     sys.stdout.flush()
     raw = input().strip()
     try:
@@ -348,13 +422,12 @@ def tui_login(config: dict):
     except (ValueError, IndexError):
         selected = session_list[default_idx]
 
-    # 启动 session
     resp = client.start_session([selected["exec"]])
     if resp["type"] == "success":
         client.close()
         os._exit(0)
     else:
-        center_print(f"  Error: {resp.get('description', 'start failed')}", columns)
+        center_print(f"  Error: {resp.get('description', 'start failed')}", columns, theme["error"])
         client.close()
 
 
