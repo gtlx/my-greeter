@@ -292,67 +292,6 @@ def get_key(timeout: float | None = None) -> str | None:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def read_password(prompt: str, columns: int, theme: dict) -> str:
-    """读取密码，每输入一个字符显示一个 *"""
-    buf = ""
-    label_style = theme.get("label", "yellow")
-    styled_prompt = styled(prompt, label_style)
-    offset = max(0, (columns - len(prompt)) // 2)
-
-    # 显示提示
-    sys.stdout.write(" " * offset + styled_prompt)
-    sys.stdout.flush()
-
-    while True:
-        key = get_key()
-        if key == "ENTER":
-            print()
-            return buf
-        elif key == "BACKSPACE":
-            if buf:
-                buf = buf[:-1]
-                # 退格：光标左移，清字符，再左移
-                sys.stdout.write("\b \b")
-                sys.stdout.flush()
-        elif key and len(key) == 1 and key.isprintable():
-            buf += key
-            sys.stdout.write("*")
-            sys.stdout.flush()
-        elif key == "q":
-            # 允许取消
-            return ""
-
-
-def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | None:
-    if not users:
-        return None
-    idx = 0
-    hl = theme.get("user_highlight", "cyan bold")
-    nm = theme.get("user_normal", "")
-    lbl = theme.get("label", "yellow")
-
-    hide_cursor()
-    while True:
-        for i, u in enumerate(users):
-            move_to(top + i + 1, 0)
-            style = hl if i == idx else nm
-            prefix = " ▸ " if i == idx else "   "
-            center_print(f"{prefix}{u}", columns, style)
-        move_to(top + len(users) + 1, 0)
-        center_print("  [↑↓ 切换   Enter 确认]", columns, lbl)
-
-        key = get_key()
-        if key == "UP": idx = (idx - 1) % len(users)
-        elif key == "DOWN": idx = (idx + 1) % len(users)
-        elif key == "ENTER":
-            show_cursor()
-            return users[idx]
-        elif key == "q":
-            show_cursor()
-            return None
-    show_cursor()
-
-
 # ─── greetd IPC 协议 ───────────────────────────────────
 
 class GreetdClient:
