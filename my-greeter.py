@@ -292,67 +292,6 @@ def get_key(timeout: float | None = None) -> str | None:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def read_password(prompt: str, columns: int, theme: dict) -> str:
-    """读取密码，每输入一个字符显示一个 *"""
-    buf = ""
-    label_style = theme.get("label", "yellow")
-    styled_prompt = styled(prompt, label_style)
-    offset = max(0, (columns - len(prompt)) // 2)
-
-    # 显示提示
-    sys.stdout.write(" " * offset + styled_prompt)
-    sys.stdout.flush()
-
-    while True:
-        key = get_key()
-        if key == "ENTER":
-            print()
-            return buf
-        elif key == "BACKSPACE":
-            if buf:
-                buf = buf[:-1]
-                # 退格：光标左移，清字符，再左移
-                sys.stdout.write("\b \b")
-                sys.stdout.flush()
-        elif key and len(key) == 1 and key.isprintable():
-            buf += key
-            sys.stdout.write("*")
-            sys.stdout.flush()
-        elif key == "q":
-            # 允许取消
-            return ""
-
-
-def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | None:
-    if not users:
-        return None
-    idx = 0
-    hl = theme.get("user_highlight", "cyan bold")
-    nm = theme.get("user_normal", "")
-    lbl = theme.get("label", "yellow")
-
-    hide_cursor()
-    while True:
-        for i, u in enumerate(users):
-            move_to(top + i + 1, 0)
-            style = hl if i == idx else nm
-            prefix = " ▸ " if i == idx else "   "
-            center_print(f"{prefix}{u}", columns, style)
-        move_to(top + len(users) + 1, 0)
-        center_print("  [↑↓ 切换   Enter 确认]", columns, lbl)
-
-        key = get_key()
-        if key == "UP": idx = (idx - 1) % len(users)
-        elif key == "DOWN": idx = (idx + 1) % len(users)
-        elif key == "ENTER":
-            show_cursor()
-            return users[idx]
-        elif key == "q":
-            show_cursor()
-            return None
-    show_cursor()
-
-
 # ─── greetd IPC 协议 ───────────────────────────────────
 
 class GreetdClient:
@@ -409,7 +348,7 @@ class GreetdClient:
 
 # ─── TUI ──────────────────────────────────────────────
 
-def tui_login(config: dict, preview: bool = False):
+def tui_login(config: dict):
     columns, lines = shutil.get_terminal_size()
     auth_cfg = config.get("auth", {})
     brand = config.get("branding", {})
@@ -532,14 +471,6 @@ def tui_login(config: dict, preview: bool = False):
     move_to(session_line, 0)
     center_print(f"  Session: {session_list[sess_idx]['name']}", columns, theme["session_default"] if sess_idx == 0 else theme["session_highlight"])
 
-    if preview:
-        print()
-        center_print("  [Preview] Auth success!", columns, theme["session_default"])
-        center_print(f"  [Preview] Starting session: {session_list[sess_idx]['name']}", columns, theme["plugin"])
-        center_print("  Press any key to exit preview", columns, theme["label"])
-        get_key()
-        return
-
     # ---- 连接 greetd 并认证 ----
     client = GreetdClient()
     resp = client.create_session(username)
@@ -594,15 +525,11 @@ def tui_login(config: dict, preview: bool = False):
 # ─── 入口 ──────────────────────────────────────────────
 
 def main():
-    preview = "--preview" in sys.argv
     config = load_config()
     init_log(config)
-    if preview:
-        log("INFO", "preview mode")
-    else:
-        log("INFO", "greeter started")
+    log("INFO", "greeter started")
     try:
-        tui_login(config, preview=preview)
+        tui_login(config)
     except KeyboardInterrupt:
         log("INFO", "user cancelled (Ctrl+C)")
         print()
