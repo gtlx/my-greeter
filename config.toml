@@ -1,0 +1,22 @@
+[log]
+enable = false
+path = "/tmp/my-greeter.log"
+
+[auth]
+default_user = "gtlx"
+auto_login = false
+
+[branding]
+title = "gtlx's machine"
+
+[theme]
+title = "cyan bold"
+sep = ""
+plugin = "green"
+label = "yellow"
+input = "white"
+error = "red bold"
+session_highlight = "cyan bold"
+session_normal = ""
+user_highlight = "cyan bold"
+user_normal = ""
