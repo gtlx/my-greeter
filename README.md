@@ -52,11 +52,7 @@ path = "/tmp/my-greeter.log"   # 日志文件路径
 
 [auth]
 default_user = "gtlx"       # 默认用户名
-auto_login = false           # true 跳过用户名输入，直接输密码
-
-[sessions]
-default = "niri-session"     # 默认 session
-extra = ["bash"]             # 额外 session（系统自动扫描 .desktop）
+auto_login = false           # true 跳过用户名输入
 
 [branding]
 title = "gtlx's machine"    # 标题
@@ -68,11 +64,10 @@ plugin = "green"             # 插件输出样式
 label = "yellow"             # 提示文字样式
 input = "white"              # 输入文字样式
 error = "red bold"           # 错误提示样式
-session = "white"            # session 列表样式
-session_default = "cyan"     # 默认 session 样式
-select = "yellow"            # 选择提示样式
-user_highlight = "cyan bold"  # 用户列表高亮样式
-user_normal = ""              # 用户列表普通样式
+session_highlight = "cyan bold"  # session 高亮样式
+session_normal = ""              # session 普通样式
+user_highlight = "cyan bold"     # 用户选择高亮样式
+user_normal = ""                 # 用户选择普通样式
 ```
 
 ### 登录流程
@@ -80,7 +75,9 @@ user_normal = ""              # 用户列表普通样式
 1. **多个用户时** → 方向键 ↑↓ 切换用户，Enter 确认
 2. **单个用户时** → 自动选中，直接进入密码输入
 3. **`auto_login = true` 时** → 完全跳过用户选择
-4. **认证成功后** → 自动启动默认 session，不再提示选择
+4. **认证成功后** → 显示 `Starting Niri...`，3 秒后自动启动
+   - 按 ↑↓ 进入完整 session 选择列表
+   - 按 Enter 立即启动当前选中
 
 ### 日志
 

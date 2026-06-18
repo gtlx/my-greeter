@@ -13,6 +13,7 @@ import tomllib
 import shutil
 import termios
 import tty
+import select
 from pathlib import Path
 import configparser
 
@@ -25,24 +26,9 @@ CONFIG_PATHS = [
 ]
 
 DEFAULT_CONFIG = {
-    "log": {
-        "enable": False,
-        "path": "/tmp/my-greeter.log",
-    },
-    "ui": {
-        "theme": "dark",
-    },
-    "sessions": {
-        "default": "",
-        "extra": [],
-    },
-    "auth": {
-        "default_user": "",
-        "auto_login": False,
-    },
-    "branding": {
-        "title": "Welcome",
-    },
+    "log": {"enable": False, "path": "/tmp/my-greeter.log"},
+    "auth": {"default_user": "", "auto_login": False},
+    "branding": {"title": "Welcome"},
 }
 
 SESSION_DIRS = [
@@ -141,7 +127,8 @@ DEFAULT_THEME = {
     "error": "red bold",
     "session": "white",
     "session_default": "cyan",
-    "select": "yellow",
+    "session_highlight": "cyan bold",
+    "session_normal": "",
     "user_highlight": "cyan bold",
     "user_normal": "",
 }
@@ -150,6 +137,7 @@ DEFAULT_THEME = {
 # ─── 自动检测桌面环境 ──────────────────────────────────
 
 def scan_sessions() -> list[dict]:
+    """自动扫描已安装的桌面环境"""
     sessions = []
     for dir_path in SESSION_DIRS:
         if not dir_path.is_dir():
@@ -170,41 +158,10 @@ def scan_sessions() -> list[dict]:
                     "name": name,
                     "exec": exec_cmd,
                     "type": session_type,
-                    "file": desktop_file.name,
                 })
             except Exception:
                 continue
     return sessions
-
-
-def merge_sessions(config_sessions: dict) -> list[dict]:
-    scanned = scan_sessions()
-    extra = config_sessions.get("extra", [])
-    default_exec = config_sessions.get("default", "")
-    seen = set()
-    merged = []
-    for s in scanned:
-        key = s["exec"]
-        if key not in seen:
-            seen.add(key)
-            merged.append(s)
-    for item in extra:
-        if isinstance(item, str):
-            cmd, name = item, item
-        elif isinstance(item, dict):
-            cmd = item.get("exec", "")
-            name = item.get("name", cmd)
-        else:
-            continue
-        if cmd and cmd not in seen:
-            seen.add(cmd)
-            merged.append({"name": name, "exec": cmd, "type": "user"})
-    if default_exec:
-        for s in merged:
-            s["default"] = s["exec"] == default_exec
-    elif merged:
-        merged[0]["default"] = True
-    return merged
 
 
 # ─── 用户检测 ──────────────────────────────────────────
@@ -213,22 +170,19 @@ EXCLUDED_USERS = {"nobody", "nobody", "nfsnobody", "guest"}
 
 
 def list_users(min_uid: int = 1000) -> list[str]:
-    """读取 /etc/passwd，返回真实可登录的用户列表"""
     users = []
     try:
         for line in Path("/etc/passwd").read_text().splitlines():
             parts = line.split(":")
             if len(parts) < 7:
                 continue
-            name, _, uid_str, _, _, _, shell = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
+            name, _, uid_str, _, _, _, shell = parts
             try:
                 uid = int(uid_str)
             except ValueError:
                 continue
-            # 系统用户（UID < min_uid）或排除名单里的跳过
             if uid < min_uid or name in EXCLUDED_USERS:
                 continue
-            # 没有登录 shell 的也跳过
             if shell in ("/usr/bin/nologin", "/bin/false", "/sbin/nologin"):
                 continue
             users.append(name)
@@ -288,55 +242,72 @@ def clear_screen():
 
 
 def move_to(row: int, col: int = 0):
-    """将光标移动到指定行列（用于局部刷新）"""
     print(f"\033[{row};{col}H", end="")
 
 
-def save_cursor():
-    print("\033[s", end="")
+def hide_cursor():
+    print("\033[?25l", end="")
 
 
-def restore_cursor():
-    print("\033[u", end="")
+def show_cursor():
+    print("\033[?25h", end="")
 
 
 # ─── 键盘输入（方向键支持）─────────────────────────────
 
-def get_key() -> str:
+def _raw_getch(timeout: float | None = None) -> str | None:
     """
-    读取一个按键。返回：
-      'UP', 'DOWN', 'ENTER', 'q', 或其他字符
+    读取一个字符（raw 模式）。
+    timeout=None 阻塞等待；timeout 秒数则超时返回 None。
     """
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
+        if timeout is not None:
+            r, _, _ = select.select([fd], [], [], timeout)
+            if not r:
+                return None
         ch = sys.stdin.read(1)
-        if ch == "\033":
-            seq = sys.stdin.read(2)
-            if seq == "[A":
-                return "UP"
-            elif seq == "[B":
-                return "DOWN"
-            elif seq == "[C":
-                return "RIGHT"
-            elif seq == "[D":
-                return "LEFT"
-            return None
-        elif ch in ("\r", "\n"):
-            return "ENTER"
-        elif ch in ("\x03",):
-            raise KeyboardInterrupt
         return ch
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def get_key(timeout: float | None = None) -> str | None:
+    """
+    读取一个按键。
+    timeout=None 阻塞等待；timeout 秒数则超时返回 None。
+    返回: 'UP', 'DOWN', 'ENTER', 'q', 其他字符, 或 None(超时)
+    """
+    ch = _raw_getch(timeout)
+    if ch is None:
+        return None
+    if ch == "\033":
+        seq = _raw_getch(0.05)  # 短超时区分 ESC 和方向键
+        if seq is None:
+            return "ESC"
+        seq2 = _raw_getch(0.05)
+        if seq2 is None:
+            return None
+        combo = seq + seq2
+        if combo == "[A":
+            return "UP"
+        elif combo == "[B":
+            return "DOWN"
+        elif combo == "[C":
+            return "RIGHT"
+        elif combo == "[D":
+            return "LEFT"
+        return None
+    elif ch in ("\r", "\n"):
+        return "ENTER"
+    elif ch in ("\x03",):
+        raise KeyboardInterrupt
+    return ch
+
+
 def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | None:
-    """
-    方向键选择用户。返回选中的用户名，或 None（退出）。
-    只有 >= 2 个用户时才会调用。
-    """
     if not users:
         return None
     idx = 0
@@ -344,16 +315,15 @@ def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | 
     nm = theme.get("user_normal", "")
     lbl = theme.get("label", "yellow")
 
+    hide_cursor()
     while True:
-        save_cursor()
-        # 在指定位置渲染用户列表
+        save_line = top
         for i, u in enumerate(users):
-            line = top + i + 1
-            move_to(line, 0)
+            move_to(save_line + i + 1, 0)
             style = hl if i == idx else nm
             prefix = " ▸ " if i == idx else "   "
             center_print(f"{prefix}{u}", columns, style)
-        move_to(top + len(users) + 1, 0)
+        move_to(save_line + len(users) + 1, 0)
         center_print("  [↑↓ 切换   Enter 确认]", columns, lbl)
 
         key = get_key()
@@ -362,9 +332,93 @@ def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | 
         elif key == "DOWN":
             idx = (idx + 1) % len(users)
         elif key == "ENTER":
+            show_cursor()
             return users[idx]
         elif key == "q":
+            show_cursor()
             return None
+    show_cursor()
+
+
+def select_session_with_timeout(
+    sessions: list[dict], theme: dict, columns: int, top_row: int, timeout_s: int = 3
+) -> dict | None:
+    """
+    等待用户选择 session。显示提示后：
+    - 按 ↑↓ 切换 → 进入完整选择模式
+    - 按 Enter 或无操作 timeout_s 秒 → 返回第一个（默认）session
+    - 返回 None 表示退出
+    """
+    if not sessions:
+        return None
+
+    default = sessions[0]
+    default_name = default["name"]
+    start_msg = f"  Starting {default_name}..."
+    auto_msg = f"  (↑↓ choose session, auto-start in {timeout_s}s)"
+
+    sh = theme.get("session_highlight", "cyan bold")
+    sn = theme.get("session_normal", "")
+    st = theme.get("session_default", "cyan")
+    lbl = theme.get("label", "yellow")
+
+    hide_cursor()
+
+    # 先显示默认启动提示
+    move_to(top_row, 0)
+    center_print(start_msg, columns, st)
+    move_to(top_row + 1, 0)
+    center_print(auto_msg, columns, lbl)
+
+    # 等用户按键（带超时）
+    key = get_key(timeout_s)
+
+    if key is None:
+        # 超时，启动默认
+        show_cursor()
+        return default
+
+    if key == "ENTER":
+        show_cursor()
+        return default
+
+    if key == "q":
+        show_cursor()
+        return None
+
+    # UP 或 DOWN → 进入完整选择模式
+    idx = 0
+    showing = True
+
+    while True:
+        if showing:
+            # 渲染 session 列表
+            help_line = "  [↑↓ 切换   Enter 确认]"
+            for i, s in enumerate(sessions):
+                line = top_row + i + 1
+                move_to(line, 0)
+                style = sh if i == idx else sn
+                prefix = " ▸ " if i == idx else "   "
+                center_print(f"{prefix}{s['name']}", columns, style)
+            move_to(top_row + len(sessions) + 1, 0)
+            center_print(help_line, columns, lbl)
+
+        if key == "UP":
+            idx = (idx - 1) % len(sessions)
+            showing = True
+        elif key == "DOWN":
+            idx = (idx + 1) % len(sessions)
+            showing = True
+        elif key == "ENTER":
+            show_cursor()
+            return sessions[idx]
+        elif key == "q":
+            show_cursor()
+            return None
+        else:
+            showing = False
+
+        key = get_key()
 
 
 # ─── greetd IPC 协议 ───────────────────────────────────
@@ -421,20 +475,19 @@ class GreetdClient:
         self.sock.close()
 
 
-# ─── TUI（居中 + 主题 + 方向键切换）────────────────────
+# ─── TUI ──────────────────────────────────────────────
 
 def tui_login(config: dict):
     columns, lines = shutil.get_terminal_size()
-    auth_cfg = config["auth"]
-    sessions = config["sessions"]
-    brand = config["branding"]
+    auth_cfg = config.get("auth", {})
+    brand = config.get("branding", {})
     theme = {**DEFAULT_THEME, **(config.get("theme") or {})}
 
     plugin_lines = load_plugins()
     log("INFO", f"loaded {len(plugin_lines)} plugin lines")
 
-    title = f"  {brand['title']}"
-    sep = f"  {'─' * len(brand['title'])}"
+    title = f"  {brand.get('title', 'Welcome')}"
+    sep = f"  {'─' * len(title)}"
 
     # ---- 用户选择 ----
     default_user = auth_cfg.get("default_user", "")
@@ -445,17 +498,12 @@ def tui_login(config: dict):
         username = default_user
     elif len(available_users) == 1:
         username = available_users[0]
-    elif default_user and default_user in available_users:
-        # 直接预选中，但还是显示选择界面
-        username = default_user
     else:
         username = ""
 
-    # 如果有多个用户，显示方向键选择界面
     need_user_select = len(available_users) >= 2 and not auto_login
 
     if need_user_select:
-        # 重新计算布局：加上用户列表
         ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + len(available_users) + 2
     else:
         ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines)
@@ -465,7 +513,6 @@ def tui_login(config: dict):
     clear_screen()
     print("\n" * top_padding, end="")
 
-    # ---- 标题 ----
     center_print(title, columns, theme["title"])
     center_print(sep, columns, theme["sep"])
     if plugin_lines:
@@ -474,19 +521,18 @@ def tui_login(config: dict):
             center_print(f"  {line}", columns, theme["plugin"])
     print()
 
-    # ---- 用户列表（方向键）----
+    # ---- 用户列表（方向键选择）----
     if need_user_select:
         current_top = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines)
         username = select_user(available_users, theme, columns, current_top)
         if username is None:
             return
-        # 选中后清除用户列表
         for i in range(len(available_users) + 2):
             move_to(current_top + i + 1, 0)
             print(" " * columns)
 
-    # ---- 显示选中的用户 ----
-    label = styled(f"  User:", theme["label"])
+    # ---- 显示用户 ----
+    label = styled("  User:", theme["label"])
     value = styled(f" {username}", theme["input"])
     text = label + value
     offset = max(0, (columns - len("  User: ") - len(username)) // 2)
@@ -531,24 +577,29 @@ def tui_login(config: dict):
 
     log("INFO", f"auth success: user={username}")
 
-    # ---- 自动选择 session（不再提示）----
-    session_list = merge_sessions(sessions)
+    # ---- session 选择（带超时，默认自动启动）----
+    session_list = scan_sessions()
     if not session_list:
         center_print("  No sessions available", columns, theme["error"])
         client.close()
         return
 
-    # 找默认 session
-    selected = None
-    for s in session_list:
-        if s.get("default"):
-            selected = s
-            break
-    if not selected:
-        selected = session_list[0]
+    current_top = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 2
+    selected = select_session_with_timeout(session_list, theme, columns, current_top, timeout_s=3)
+
+    if selected is None:
+        center_print("  Cancelled", columns, theme["error"])
+        client.close()
+        return
+
+    # 清除 session 选择提示
+    for i in range(len(session_list) + 3):
+        move_to(current_top + i, 0)
+        print(" " * columns)
 
     cmd = selected["exec"]
     log("INFO", f"starting session: {cmd} for user={username}")
+    center_print(f"  Starting {selected['name']}...", columns, theme["session_default"])
 
     resp = client.start_session([cmd])
     if resp["type"] == "success":
