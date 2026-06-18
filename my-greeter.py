@@ -11,6 +11,7 @@ import struct
 import socket
 import tomllib
 from pathlib import Path
+import configparser
 
 # ─── 配置 ──────────────────────────────────────────────
 
@@ -27,14 +28,19 @@ DEFAULT_CONFIG = {
         "time_format": "%H:%M:%S",
     },
     "sessions": {
-        "default": "niri-session",
-        "list": ["niri-session", "sway", "Hyprland", "bash"],
+        "default": "",
+        "extra": [],
     },
     "branding": {
         "title": "Welcome",
         "greeting": "Enter password for %s",
     },
 }
+
+SESSION_DIRS = [
+    Path("/usr/share/wayland-sessions"),
+    Path("/usr/share/xsessions"),
+]
 
 
 def load_config() -> dict:
@@ -43,6 +49,81 @@ def load_config() -> dict:
             with open(path, "rb") as f:
                 return tomllib.load(f)
     return DEFAULT_CONFIG
+
+
+# ─── 自动检测桌面环境 ──────────────────────────────────
+
+def scan_sessions() -> list[dict]:
+    """扫描系统安装的桌面环境，返回 [{name, exec, type}, ...]"""
+    sessions = []
+    for dir_path in SESSION_DIRS:
+        if not dir_path.is_dir():
+            continue
+        session_type = dir_path.name.replace("-sessions", "")  # wayland / x11
+        for desktop_file in sorted(dir_path.glob("*.desktop")):
+            try:
+                parser = configparser.ConfigParser()
+                parser.read(desktop_file)
+                if "Desktop Entry" not in parser:
+                    continue
+                entry = parser["Desktop Entry"]
+                name = entry.get("Name", desktop_file.stem)
+                exec_cmd = entry.get("Exec", "")
+                if not exec_cmd:
+                    continue
+                sessions.append({
+                    "name": name,
+                    "exec": exec_cmd,
+                    "type": session_type,
+                    "file": desktop_file.name,
+                })
+            except Exception:
+                continue
+    return sessions
+
+
+def merge_sessions(config_sessions: dict) -> list[dict]:
+    """合并系统检测 + 用户配置的 session 列表"""
+    scanned = scan_sessions()
+    extra = config_sessions.get("extra", [])
+    default_exec = config_sessions.get("default", "")
+
+    # 用 exec 命令去重：用户 extra 优先
+    seen = set()
+    merged = []
+
+    # 先用系统扫描的
+    for s in scanned:
+        key = s["exec"]
+        if key not in seen:
+            seen.add(key)
+            merged.append(s)
+
+    # 再添加用户配置的 extra（如果不在系统扫描中）
+    for item in extra:
+        if isinstance(item, str):
+            cmd = item
+            name = item
+        elif isinstance(item, dict):
+            cmd = item.get("exec", "")
+            name = item.get("name", cmd)
+        else:
+            continue
+        if cmd and cmd not in seen:
+            seen.add(cmd)
+            merged.append({"name": name, "exec": cmd, "type": "user"})
+
+    # 标记默认 session
+    if default_exec:
+        for s in merged:
+            if s["exec"] == default_exec:
+                s["default"] = True
+            else:
+                s["default"] = False
+    elif merged:
+        merged[0]["default"] = True
+
+    return merged
 
 
 # ─── greetd IPC 协议 ───────────────────────────────────
@@ -103,14 +184,9 @@ class GreetdClient:
         self.sock.close()
 
 
-# ─── 简陋 TUI（文本登录界面）────────────────────────────
+# ─── TUI（文本登录界面）────────────────────────────────
 
 def tui_login(config: dict):
-    """
-    简单的终端登录流程。
-    后续可以换成 textual / prompt_toolkit / urwid 等 TUI 框架。
-    """
-    cfg = config["ui"]
     sessions = config["sessions"]
     brand = config["branding"]
 
@@ -138,7 +214,6 @@ def tui_login(config: dict):
                 answer = getpass(f"  {msg_text}")
             elif msg_type in ("info", "error"):
                 print(f"  [{msg_type}] {msg_text}")
-                # 纯信息消息，无需 response 字段
                 resp = client.post_auth_response()
                 continue
             else:
@@ -150,22 +225,37 @@ def tui_login(config: dict):
             return
 
     # 选择 session
+    session_list = merge_sessions(sessions)
+
+    if not session_list:
+        print("  ERROR: 没有可用的桌面环境")
+        client.close()
+        return
+
+    # 找到默认 session 的索引
+    default_idx = 0
+    for i, s in enumerate(session_list):
+        if s.get("default"):
+            default_idx = i
+            break
+
     print("\n  Sessions:")
-    session_list = sessions["list"]
-    for i, sess in enumerate(session_list, 1):
-        print(f"    {i}. {sess}")
+    for i, s in enumerate(session_list, 1):
+        marker = " ⬅" if s.get("default") else ""
+        type_tag = f" [{s.get('type', '?')}]"
+        print(f"    {i}. {s['name']}{type_tag}{marker}")
+
     try:
-        choice = input(f"  Select [1/{len(session_list)}] (default=1): ").strip()
-        idx = int(choice) - 1 if choice else 0
+        choice = input(f"  Select [1/{len(session_list)}] (default={default_idx + 1}): ").strip()
+        idx = int(choice) - 1 if choice else default_idx
         selected = session_list[idx]
     except (ValueError, IndexError):
-        selected = sessions["default"]
+        selected = session_list[default_idx]
 
     # 启动 session
-    resp = client.start_session([selected])
+    resp = client.start_session([selected["exec"]])
     if resp["type"] == "success":
         client.close()
-        # 正常退出，greetd 接管启动 session
         os._exit(0)
     else:
         print(f"  ERROR: {resp.get('description', '启动失败')}")
