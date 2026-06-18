@@ -421,7 +421,7 @@ def tui_login(config: dict, preview: bool = False):
     title = f"  {brand.get('title', 'Welcome')}"
     sep = f"  {'─' * len(title)}"
 
-    ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 3
+    ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 4
     top_padding = max(0, (lines - ui_height) // 2)
 
     clear_screen()
@@ -437,6 +437,7 @@ def tui_login(config: dict, preview: bool = False):
 
     session_line = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 1
     user_line = session_line + 1
+    pwd_line = user_line + 1
 
     # ---- session 选择 ----
     session_list = scan_sessions()
@@ -446,8 +447,15 @@ def tui_login(config: dict, preview: bool = False):
         return
 
     sess_idx = 0
+    # 从配置预填用户名
+    default_user = auth_cfg.get("default_user", "")
+    username = default_user if not auth_cfg.get("auto_login") else default_user
+    password = ""
+    field = "user" if not default_user else "password"  # 有默认用户则直接跳到密码
+    # 如果 auto_login 并且有默认用户，也先停在密码
 
-    def show_session():
+    def render_all():
+        # Session 行
         s = session_list[sess_idx]
         text = f"  Session: {s['name']}  [\u2190 \u2192]"
         move_to(session_line, 0)
@@ -455,84 +463,81 @@ def tui_login(config: dict, preview: bool = False):
         move_to(session_line, 0)
         center_print(text, columns, theme["session_default"] if sess_idx == 0 else theme["session_highlight"])
 
-    show_session()
-
-    while True:
-        key = get_key()
-        if key == "RIGHT":
-            sess_idx = (sess_idx + 1) % len(session_list)
-            show_session()
-        elif key == "LEFT":
-            sess_idx = (sess_idx - 1) % len(session_list)
-            show_session()
-        elif key == "ENTER":
-            break
-        elif key == "q":
-            return
-
-    # 清除提示箭头
-    move_to(session_line, 0)
-    print(" " * columns, end="")
-    move_to(session_line, 0)
-    s = session_list[sess_idx]
-    center_print(f"  Session: {s['name']}", columns, theme["session_default"] if sess_idx == 0 else theme["session_highlight"])
-
-    # ---- 用户 ----
-    default_user = auth_cfg.get("default_user", "")
-    auto_login = auth_cfg.get("auto_login", False)
-    available_users = list_users()
-
-    if auto_login and default_user:
-        username = default_user
-    elif len(available_users) == 1:
-        username = available_users[0]
-    elif default_user and default_user in available_users:
-        username = default_user
-    else:
-        username = ""
-
-    need_user_select = len(available_users) >= 2 and not auto_login
-
-    if need_user_select:
-        username = select_user(available_users, theme, columns, user_line)
-        if username is None:
-            return
-        for i in range(len(available_users) + 2):
-            move_to(user_line + i + 1, 0)
-            print(" " * columns)
-    else:
-        label = styled("  User:", theme["label"])
-        value = styled(f" {username}", theme["input"])
-        text = label + value
-        offset = max(0, (columns - len("  User: ") - len(username)) // 2)
+        # User 行
+        user_text = f"  User: {username}"
+        cursor = "" if field != "user" else "\u258c"
         move_to(user_line, 0)
         print(" " * columns, end="")
         move_to(user_line, 0)
-        print(" " * offset + text)
+        center_print(user_text + cursor, columns, theme["label"] if not username else theme["input"])
 
-    if not username:
-        log("WARN", "no user selected, exiting")
+        # Password 行
+        stars = "*" * len(password)
+        pwd_text = f"  Password: {stars}"
+        cursor = "" if field != "password" else "\u258c"
+        move_to(pwd_line, 0)
+        print(" " * columns, end="")
+        move_to(pwd_line, 0)
+        center_print(pwd_text + cursor, columns, theme["label"] if not password else theme["input"])
+
+    render_all()
+
+    while True:
+        key = get_key()
+
+        if key == "RIGHT":
+            sess_idx = (sess_idx + 1) % len(session_list)
+            render_all()
+        elif key == "LEFT":
+            sess_idx = (sess_idx - 1) % len(session_list)
+            render_all()
+        elif key == "ENTER":
+            if field == "user":
+                if username:
+                    field = "password"
+                    render_all()
+                # 没输用户名就继续等
+            elif field == "password":
+                if password:
+                    break  # 提交
+        elif key == "TAB":
+            field = "password" if field == "user" else "user"
+            render_all()
+        elif key == "BACKSPACE":
+            if field == "user" and username:
+                username = username[:-1]
+                render_all()
+            elif field == "password" and password:
+                password = password[:-1]
+                render_all()
+        elif key == "q":
+            return
+        elif key and len(key) == 1 and key.isprintable():
+            if field == "user":
+                username += key
+                render_all()
+            elif field == "password":
+                password += key
+                render_all()
+
+    if not username or not password:
+        log("WARN", "empty user or password")
         return
 
     log("INFO", f"login attempt: user={username}")
 
-    # ---- 密码 ----
-    pwd_line = user_line + 1
-    move_to(pwd_line, 0)
-
-    password = read_password("  Password: ", columns, theme)
+    # 清除 Session 箭头提示
+    move_to(session_line, 0)
+    print(" " * columns, end="")
+    move_to(session_line, 0)
+    center_print(f"  Session: {session_list[sess_idx]['name']}", columns, theme["session_default"] if sess_idx == 0 else theme["session_highlight"])
 
     if preview:
-        # 预览模式：显示认证成功模拟，然后退出
         print()
         center_print("  [Preview] Auth success!", columns, theme["session_default"])
         center_print(f"  [Preview] Starting session: {session_list[sess_idx]['name']}", columns, theme["plugin"])
         center_print("  Press any key to exit preview", columns, theme["label"])
         get_key()
-        return
-
-    if not password:
-        log("WARN", "empty password, cancelling")
         return
 
     # ---- 连接 greetd 并认证 ----
