@@ -411,11 +411,25 @@ def tui_login(config: dict):
     title = f"  {brand.get('title', 'Welcome')}"
     sep = f"  {'─' * len(title)}"
 
-    # 用户选择
-    # 先算布局：第一行标题，第二行分隔线，插件行，空行，Session行，User行
-    base = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines)
-    session_line = base + 1  # 空一行后是 Session
-    user_line = session_line + 1  # Session 下一行是 User
+    # 先算垂直居中偏移
+    ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 3
+    top_padding = max(0, (lines - ui_height) // 2)
+
+    clear_screen()
+    print("\n" * top_padding, end="")
+
+    center_print(title, columns, theme["title"])
+    center_print(sep, columns, theme["sep"])
+    if plugin_lines:
+        print()
+        for line in plugin_lines:
+            center_print(f"  {line}", columns, theme["plugin"])
+
+    print()
+
+    # 布局行号：Session行，User行
+    session_line = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 1
+    user_line = session_line + 1
 
     # ---- session 选择（始终显示，← → 切换）----
     session_list = scan_sessions()
