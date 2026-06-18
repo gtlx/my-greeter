@@ -1,24 +1,58 @@
 #!/usr/bin/env python3
 """
-时钟插件 — 显示当前时间
-协议：输出一行 JSON {"name":"clock","lines":["14:30:00"]}
-
-支持配置文件：
-  ~/.config/my-greeter/config.toml
-    [plugins.clock]
-    format = "%H:%M:%S"
+像素风格时钟插件
+输出一个 5 行高的 ASCII art 时钟，支持冒号闪烁。
 """
 
 import json
-import os
-import sys
 from datetime import datetime
 
-# 如果有 config.toml 里的插件配置，可以读
-# 这里简单处理，直接用默认格式
+DIGITS = {
+    "0": [" ██ ", "█  █", "█  █", "█  █", " ██ "],
+    "1": ["  █ ", " ██ ", "  █ ", "  █ ", " ███"],
+    "2": [" ██ ", "   █", " ██ ", "█   ", "████"],
+    "3": [" ██ ", "   █", " ██ ", "   █", " ██ "],
+    "4": ["█  █", "█  █", "████", "   █", "   █"],
+    "5": ["████", "█   ", "███ ", "   █", "███ "],
+    "6": [" ██ ", "█   ", "███ ", "█  █", " ██ "],
+    "7": ["████", "   █", "  █ ", " █  ", "█   "],
+    "8": [" ██ ", "█  █", " ██ ", "█  █", " ██ "],
+    "9": [" ██ ", "█  █", " ███", "   █", " ██ "],
+}
 
-fmt = "%H:%M:%S"
-time_str = datetime.now().strftime(fmt)
+COLON = ["    ", " ██ ", "    ", " ██ ", "    "]
 
-# 输出单行 JSON
-print(json.dumps({"name": "clock", "lines": [time_str]}))
+
+def build_clock(hh: str, mm: str, ss: str, colon_on: bool) -> list[str]:
+    """构建 5 行像素时钟"""
+    parts = [hh, mm] if colon_on else [hh, mm]
+    colon_glyph = COLON if colon_on else ["    "] * 5
+
+    lines = [""] * 5
+    for idx, part in enumerate(parts):
+        for row in range(5):
+            if lines[row]:
+                lines[row] += "  "
+            lines[row] += DIGITS[part[0]][row]
+            lines[row] += " "
+            lines[row] += DIGITS[part[1]][row]
+        if idx == 0:
+            for row in range(5):
+                lines[row] += " " + colon_glyph[row]
+
+    return [f"  {line}" for line in lines]
+
+
+def main():
+    now = datetime.now()
+    hh = now.strftime("%H")
+    mm = now.strftime("%M")
+    ss = now.strftime("%S")
+    colon_on = int(ss) % 2 == 0
+
+    lines = build_clock(hh, mm, ss, colon_on)
+    print(json.dumps({"name": "clock", "lines": lines}))
+
+
+if __name__ == "__main__":
+    main()
