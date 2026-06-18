@@ -1,22 +1,13 @@
-# my-greeter 配置文件
-# 路径优先级：
-#   1. /etc/my-greeter/config.toml
-#   2. ~/.config/my-greeter/config.toml
-#   3. 脚本所在目录的 config.toml
-
 [ui]
 theme = "dark"
-show_clock = true
-time_format = "%H:%M:%S"
 
 [sessions]
-# 默认 session（可写 Exec 命令或 leave blank 用第一个）
 default = "niri-session"
-
-# 额外 session（系统自动扫描 wayland-sessions/ + xsessions/）
-# 这里写系统没有的，比如直接启动 shell
 extra = ["bash"]
+
+[auth]
+default_user = "gtlx"
+auto_login = false
 
 [branding]
 title = "gtlx's machine"
-greeting = "Enter password for %s"

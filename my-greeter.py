@@ -10,6 +10,7 @@ import json
 import struct
 import socket
 import tomllib
+import shutil
 from pathlib import Path
 import configparser
 
@@ -24,16 +25,17 @@ CONFIG_PATHS = [
 DEFAULT_CONFIG = {
     "ui": {
         "theme": "dark",
-        "show_clock": True,
-        "time_format": "%H:%M:%S",
     },
     "sessions": {
         "default": "",
         "extra": [],
     },
+    "auth": {
+        "default_user": "",
+        "auto_login": False,
+    },
     "branding": {
         "title": "Welcome",
-        "greeting": "Enter password for %s",
     },
 }
 
@@ -59,7 +61,7 @@ def scan_sessions() -> list[dict]:
     for dir_path in SESSION_DIRS:
         if not dir_path.is_dir():
             continue
-        session_type = dir_path.name.replace("-sessions", "")  # wayland / x11
+        session_type = dir_path.name.replace("-sessions", "")
         for desktop_file in sorted(dir_path.glob("*.desktop")):
             try:
                 parser = configparser.ConfigParser()
@@ -88,18 +90,15 @@ def merge_sessions(config_sessions: dict) -> list[dict]:
     extra = config_sessions.get("extra", [])
     default_exec = config_sessions.get("default", "")
 
-    # 用 exec 命令去重：用户 extra 优先
     seen = set()
     merged = []
 
-    # 先用系统扫描的
     for s in scanned:
         key = s["exec"]
         if key not in seen:
             seen.add(key)
             merged.append(s)
 
-    # 再添加用户配置的 extra（如果不在系统扫描中）
     for item in extra:
         if isinstance(item, str):
             cmd = item
@@ -113,17 +112,26 @@ def merge_sessions(config_sessions: dict) -> list[dict]:
             seen.add(cmd)
             merged.append({"name": name, "exec": cmd, "type": "user"})
 
-    # 标记默认 session
     if default_exec:
         for s in merged:
-            if s["exec"] == default_exec:
-                s["default"] = True
-            else:
-                s["default"] = False
+            s["default"] = s["exec"] == default_exec
     elif merged:
         merged[0]["default"] = True
 
     return merged
+
+
+# ─── 终端居中工具 ──────────────────────────────────────
+
+def center_print(text: str, width: int):
+    """居中打印一行文本"""
+    padding = max(0, (width - len(text)) // 2)
+    print(" " * padding + text)
+
+
+def clear_screen():
+    """清屏"""
+    print("\033[2J\033[H", end="")
 
 
 # ─── greetd IPC 协议 ───────────────────────────────────
@@ -134,7 +142,7 @@ class GreetdClient:
     def __init__(self):
         sock_path = os.environ.get("GREETD_SOCK")
         if not sock_path:
-            print("ERROR: GREETD_SOCK 环境变量未设置", file=sys.stderr)
+            print("ERROR: GREETD_SOCK not set", file=sys.stderr)
             sys.exit(1)
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(sock_path)
@@ -148,7 +156,7 @@ class GreetdClient:
         raw_len = self.sock.recv(4)
         if not raw_len:
             return {"type": "error", "error_type": "error",
-                    "description": "连接已关闭"}
+                    "description": "connection closed"}
         length = struct.unpack("I", raw_len)[0]
         data = b""
         while len(data) < length:
@@ -184,43 +192,74 @@ class GreetdClient:
         self.sock.close()
 
 
-# ─── TUI（文本登录界面）────────────────────────────────
+# ─── TUI（居中登录界面）────────────────────────────────
 
 def tui_login(config: dict):
+    columns, lines = shutil.get_terminal_size()
+    auth_cfg = config["auth"]
     sessions = config["sessions"]
     brand = config["branding"]
 
-    print(f"\n  {brand['title']}")
-    print(f"  {'─' * len(brand['title'])}\n")
+    # 标题行
+    title = f"  {brand['title']}"
+    sep = f"  {'─' * len(brand['title'])}"
+
+    # 计算界面总行数
+    ui_lines = 5  # 空行 + title + sep + 空行 + 输入行
+    top_padding = max(0, (lines - ui_lines) // 2)
+
+    clear_screen()
+
+    # 垂直居中
+    print("\n" * top_padding, end="")
+
+    # 水平居中
+    center_print(title, columns)
+    center_print(sep, columns)
+    print()
 
     # 用户名
-    username = input("  Username: ").strip()
+    default_user = auth_cfg.get("default_user", "")
+    if auth_cfg.get("auto_login") and default_user:
+        username = default_user
+        print(f"{' ' * ((columns - len(f'  User: {username}')) // 2)}  User: {username}")
+    else:
+        prompt = f"  User{f' [{default_user}]' if default_user else ''}: "
+        # 将光标移到居中位置再输入
+        offset = (columns - len(prompt)) // 2
+        sys.stdout.write(" " * offset + prompt)
+        sys.stdout.flush()
+        raw = input().strip()
+        username = raw if raw else default_user
+
     if not username:
         return
 
     # 连接 greetd
     client = GreetdClient()
 
-    # create_session 已经消费了第一个响应，用它进入认证循环
+    # create_session 已消费第一个响应，直接进入认证循环
     resp = client.create_session(username)
 
-    # PAM 认证循环
     while resp["type"] != "success":
         if resp["type"] == "auth_message":
             msg_type = resp.get("auth_message_type", "visible")
             msg_text = resp.get("auth_message", "")
+            prompt_centered = " " * ((columns - len(f"  {msg_text}")) // 2)
             if msg_type == "secret":
                 from getpass import getpass
-                answer = getpass(f"  {msg_text}")
+                sys.stdout.write(prompt_centered + f"  {msg_text}")
+                sys.stdout.flush()
+                answer = getpass("")
             elif msg_type in ("info", "error"):
-                print(f"  [{msg_type}] {msg_text}")
+                center_print(f"  [{msg_type}] {msg_text}", columns)
                 resp = client.post_auth_response()
                 continue
             else:
-                answer = input(f"  {msg_text}")
+                answer = input(prompt_centered + f"  {msg_text}")
             resp = client.post_auth_response(answer)
         elif resp["type"] == "error":
-            print(f"  ERROR: {resp.get('description', 'unknown')}")
+            center_print(f"  Error: {resp.get('description', 'unknown')}", columns)
             client.close()
             return
 
@@ -228,26 +267,31 @@ def tui_login(config: dict):
     session_list = merge_sessions(sessions)
 
     if not session_list:
-        print("  ERROR: 没有可用的桌面环境")
+        center_print("  No sessions available", columns)
         client.close()
         return
 
-    # 找到默认 session 的索引
     default_idx = 0
     for i, s in enumerate(session_list):
         if s.get("default"):
             default_idx = i
             break
 
-    print("\n  Sessions:")
+    print()
+    center_print("Sessions:", columns)
     for i, s in enumerate(session_list, 1):
-        marker = " ⬅" if s.get("default") else ""
-        type_tag = f" [{s.get('type', '?')}]"
-        print(f"    {i}. {s['name']}{type_tag}{marker}")
+        marker = " <" if s.get("default") else ""
+        tag = f" [{s.get('type', '?')}]"
+        text = f"  {i}. {s['name']}{tag}{marker}"
+        center_print(text, columns)
 
+    prompt = f"  Select [1-{len(session_list)}] ({default_idx + 1}): "
+    offset = (columns - len(prompt)) // 2
+    sys.stdout.write(" " * offset + prompt)
+    sys.stdout.flush()
+    raw = input().strip()
     try:
-        choice = input(f"  Select [1/{len(session_list)}] (default={default_idx + 1}): ").strip()
-        idx = int(choice) - 1 if choice else default_idx
+        idx = int(raw) - 1 if raw else default_idx
         selected = session_list[idx]
     except (ValueError, IndexError):
         selected = session_list[default_idx]
@@ -258,7 +302,7 @@ def tui_login(config: dict):
         client.close()
         os._exit(0)
     else:
-        print(f"  ERROR: {resp.get('description', '启动失败')}")
+        center_print(f"  Error: {resp.get('description', 'start failed')}", columns)
         client.close()
 
 
@@ -269,10 +313,10 @@ def main():
     try:
         tui_login(config)
     except KeyboardInterrupt:
-        print("\n  Bye.")
+        print()
         sys.exit(0)
     except Exception as e:
-        print(f"\n  ERROR: {e}", file=sys.stderr)
+        print(f"\n  Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
