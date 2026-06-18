@@ -121,6 +121,45 @@ def merge_sessions(config_sessions: dict) -> list[dict]:
     return merged
 
 
+# ─── 插件系统 ────────────────────────────────────────────
+
+PLUGIN_DIRS = [
+    Path.home() / ".config" / "my-greeter" / "plugins",
+    Path(__file__).parent / "plugins",
+]
+
+
+def load_plugins() -> list[str]:
+    """
+    扫描插件目录，运行每个可执行文件，收集输出行。
+    插件协议：每行一个 JSON {"name":"...", "lines":["...","..."]}
+    """
+    from subprocess import run, TimeoutExpired, CalledProcessError
+    plugin_lines = []
+    seen = set()
+    for dir_path in PLUGIN_DIRS:
+        if not dir_path.is_dir():
+            continue
+        for f in sorted(dir_path.iterdir()):
+            if f.name.startswith(".") or not os.access(f, os.X_OK):
+                continue
+            if f.name in seen:
+                continue
+            seen.add(f.name)
+            try:
+                r = run([f], capture_output=True, timeout=2, text=True)
+                for line in r.stdout.strip().split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if "lines" in data:
+                        plugin_lines.extend(data["lines"])
+            except (TimeoutExpired, CalledProcessError, json.JSONDecodeError, OSError):
+                continue  # 插件出错就跳过，不阻塞
+    return plugin_lines
+
+
 # ─── 终端居中工具 ──────────────────────────────────────
 
 def center_print(text: str, width: int):
@@ -200,13 +239,19 @@ def tui_login(config: dict):
     sessions = config["sessions"]
     brand = config["branding"]
 
+    # 加载插件
+    plugin_lines = load_plugins()
+
     # 标题行
     title = f"  {brand['title']}"
     sep = f"  {'─' * len(brand['title'])}"
 
     # 计算界面总行数
-    ui_lines = 5  # 空行 + title + sep + 空行 + 输入行
-    top_padding = max(0, (lines - ui_lines) // 2)
+    # +2: 标题上下各一个空行
+    ui_height = 2 + 2 + 1 + (1 if plugin_lines else 0) + len(plugin_lines)
+    # +1: 输入行
+    ui_height += 1
+    top_padding = max(0, (lines - ui_height) // 2)
 
     clear_screen()
 
@@ -216,6 +261,13 @@ def tui_login(config: dict):
     # 水平居中
     center_print(title, columns)
     center_print(sep, columns)
+
+    # 插件输出行
+    if plugin_lines:
+        print()
+        for line in plugin_lines:
+            center_print(f"  {line}", columns)
+
     print()
 
     # 用户名
