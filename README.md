@@ -71,7 +71,16 @@ error = "red bold"           # 错误提示样式
 session = "white"            # session 列表样式
 session_default = "cyan"     # 默认 session 样式
 select = "yellow"            # 选择提示样式
+user_highlight = "cyan bold"  # 用户列表高亮样式
+user_normal = ""              # 用户列表普通样式
 ```
+
+### 登录流程
+
+1. **多个用户时** → 方向键 ↑↓ 切换用户，Enter 确认
+2. **单个用户时** → 自动选中，直接进入密码输入
+3. **`auto_login = true` 时** → 完全跳过用户选择
+4. **认证成功后** → 自动启动默认 session，不再提示选择
 
 ### 日志
 

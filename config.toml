@@ -26,3 +26,11 @@ error = "red bold"
 session = "white"
 session_default = "cyan"
 select = "yellow"
+user_highlight = "cyan bold"
+user_normal = ""
+
+# 组合写法示例
+# title = "bright_white bold"
+# label = "green bold"
+# user_highlight = "yellow bold reverse"
+# user_normal = "white"
