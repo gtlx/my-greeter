@@ -137,7 +137,6 @@ DEFAULT_THEME = {
 # ─── 自动检测桌面环境 ──────────────────────────────────
 
 def scan_sessions() -> list[dict]:
-    """自动扫描已安装的桌面环境"""
     sessions = []
     for dir_path in SESSION_DIRS:
         if not dir_path.is_dir():
@@ -253,52 +252,75 @@ def show_cursor():
     print("\033[?25h", end="")
 
 
-# ─── 键盘输入（方向键支持）─────────────────────────────
+# ─── 键盘输入 ──────────────────────────────────────────
 
 def get_key(timeout: float | None = None) -> str | None:
-    """
-    读取一个按键（保持 raw 模式读完整个序列）。
-    timeout=None 阻塞；有超时则超时返回 None。
-    """
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-
         def _read(t=None):
             if t is not None:
                 r, _, _ = select.select([fd], [], [], t)
                 if not r:
                     return None
             return sys.stdin.read(1)
-
         ch = _read(timeout)
         if ch is None:
             return None
         if ch == "\033":
-            seq = _read(0.05)
-            if seq is None:
+            s1 = _read(0.05)
+            if s1 is None:
                 return "ESC"
-            seq2 = _read(0.05)
-            if seq2 is None:
+            s2 = _read(0.05)
+            if s2 is None:
                 return None
-            combo = seq + seq2
-            if combo == "[A":
-                return "UP"
-            elif combo == "[B":
-                return "DOWN"
-            elif combo == "[C":
-                return "RIGHT"
-            elif combo == "[D":
-                return "LEFT"
+            c = s1 + s2
+            if c == "[A": return "UP"
+            if c == "[B": return "DOWN"
+            if c == "[C": return "RIGHT"
+            if c == "[D": return "LEFT"
             return None
         elif ch in ("\r", "\n"):
             return "ENTER"
         elif ch in ("\x03",):
             raise KeyboardInterrupt
+        elif ch in ("\x7f", "\b"):
+            return "BACKSPACE"
         return ch
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def read_password(prompt: str, columns: int, theme: dict) -> str:
+    """读取密码，每输入一个字符显示一个 *"""
+    buf = ""
+    label_style = theme.get("label", "yellow")
+    styled_prompt = styled(prompt, label_style)
+    offset = max(0, (columns - len(prompt)) // 2)
+
+    # 显示提示
+    sys.stdout.write(" " * offset + styled_prompt)
+    sys.stdout.flush()
+
+    while True:
+        key = get_key()
+        if key == "ENTER":
+            print()
+            return buf
+        elif key == "BACKSPACE":
+            if buf:
+                buf = buf[:-1]
+                # 退格：光标左移，清字符，再左移
+                sys.stdout.write("\b \b")
+                sys.stdout.flush()
+        elif key and len(key) == 1 and key.isprintable():
+            buf += key
+            sys.stdout.write("*")
+            sys.stdout.flush()
+        elif key == "q":
+            # 允许取消
+            return ""
 
 
 def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | None:
@@ -320,10 +342,8 @@ def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | 
         center_print("  [↑↓ 切换   Enter 确认]", columns, lbl)
 
         key = get_key()
-        if key == "UP":
-            idx = (idx - 1) % len(users)
-        elif key == "DOWN":
-            idx = (idx + 1) % len(users)
+        if key == "UP": idx = (idx - 1) % len(users)
+        elif key == "DOWN": idx = (idx + 1) % len(users)
         elif key == "ENTER":
             show_cursor()
             return users[idx]
@@ -331,16 +351,6 @@ def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | 
             show_cursor()
             return None
     show_cursor()
-
-
-def restore_tty():
-    """恢复 TTY 到 cooked 模式（getpass/input 可能搞乱终端状态）"""
-    import termios
-    fd = sys.stdin.fileno()
-    try:
-        termios.tcsetattr(fd, termios.TCSADRAIN, termios.tcgetattr(fd))
-    except Exception:
-        pass
 
 
 # ─── greetd IPC 协议 ───────────────────────────────────
@@ -399,7 +409,7 @@ class GreetdClient:
 
 # ─── TUI ──────────────────────────────────────────────
 
-def tui_login(config: dict):
+def tui_login(config: dict, preview: bool = False):
     columns, lines = shutil.get_terminal_size()
     auth_cfg = config.get("auth", {})
     brand = config.get("branding", {})
@@ -411,7 +421,6 @@ def tui_login(config: dict):
     title = f"  {brand.get('title', 'Welcome')}"
     sep = f"  {'─' * len(title)}"
 
-    # 先算垂直居中偏移
     ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 3
     top_padding = max(0, (lines - ui_height) // 2)
 
@@ -424,14 +433,12 @@ def tui_login(config: dict):
         print()
         for line in plugin_lines:
             center_print(f"  {line}", columns, theme["plugin"])
-
     print()
 
-    # 布局行号：Session行，User行
     session_line = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 1
     user_line = session_line + 1
 
-    # ---- session 选择（始终显示，← → 切换）----
+    # ---- session 选择 ----
     session_list = scan_sessions()
     if not session_list:
         log("ERROR", "no sessions found")
@@ -450,7 +457,6 @@ def tui_login(config: dict):
 
     show_session()
 
-    # ---- 等待用户操作：← → 切换 session，Enter 进下一步 ----
     while True:
         key = get_key()
         if key == "RIGHT":
@@ -464,7 +470,7 @@ def tui_login(config: dict):
         elif key == "q":
             return
 
-    # ---- 清除 Session 提示文字（保留 Session 名）----
+    # 清除提示箭头
     move_to(session_line, 0)
     print(" " * columns, end="")
     move_to(session_line, 0)
@@ -495,7 +501,6 @@ def tui_login(config: dict):
             move_to(user_line + i + 1, 0)
             print(" " * columns)
     else:
-        # 显示用户名
         label = styled("  User:", theme["label"])
         value = styled(f" {username}", theme["input"])
         text = label + value
@@ -511,9 +516,24 @@ def tui_login(config: dict):
 
     log("INFO", f"login attempt: user={username}")
 
-    # ---- 移到密码行 ----
+    # ---- 密码 ----
     pwd_line = user_line + 1
     move_to(pwd_line, 0)
+
+    password = read_password("  Password: ", columns, theme)
+
+    if preview:
+        # 预览模式：显示认证成功模拟，然后退出
+        print()
+        center_print("  [Preview] Auth success!", columns, theme["session_default"])
+        center_print(f"  [Preview] Starting session: {session_list[sess_idx]['name']}", columns, theme["plugin"])
+        center_print("  Press any key to exit preview", columns, theme["label"])
+        get_key()
+        return
+
+    if not password:
+        log("WARN", "empty password, cancelling")
+        return
 
     # ---- 连接 greetd 并认证 ----
     client = GreetdClient()
@@ -523,22 +543,18 @@ def tui_login(config: dict):
         if resp["type"] == "auth_message":
             msg_type = resp.get("auth_message_type", "visible")
             msg_text = resp.get("auth_message", "")
-            padded_msg = f"  {msg_text}"
-            styled_msg = styled(padded_msg, theme["label"])
-            offset = max(0, (columns - len(padded_msg)) // 2)
             if msg_type == "secret":
-                from getpass import getpass
-                sys.stdout.write(" " * offset + styled_msg)
-                sys.stdout.flush()
-                answer = getpass("")
+                resp = client.post_auth_response(password)
             elif msg_type in ("info", "error"):
                 stl = theme["error"] if msg_type == "error" else theme["label"]
                 center_print(f"  [{msg_type}] {msg_text}", columns, stl)
                 resp = client.post_auth_response()
                 continue
             else:
+                styled_msg = styled(f"  {msg_text}", theme["label"])
+                offset = max(0, (columns - len(f"  {msg_text}")) // 2)
                 answer = input(" " * offset + styled_msg)
-            resp = client.post_auth_response(answer)
+                resp = client.post_auth_response(answer)
         elif resp["type"] == "error":
             desc = resp.get("description", "unknown")
             log("WARN", f"auth error: {desc}")
@@ -573,11 +589,15 @@ def tui_login(config: dict):
 # ─── 入口 ──────────────────────────────────────────────
 
 def main():
+    preview = "--preview" in sys.argv
     config = load_config()
     init_log(config)
-    log("INFO", "greeter started")
+    if preview:
+        log("INFO", "preview mode")
+    else:
+        log("INFO", "greeter started")
     try:
-        tui_login(config)
+        tui_login(config, preview=preview)
     except KeyboardInterrupt:
         log("INFO", "user cancelled (Ctrl+C)")
         print()
