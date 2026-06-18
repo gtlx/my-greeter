@@ -63,6 +63,28 @@ fn run(
     while app.running {
         if let Event::Key(key) = event::read()? {
             match (key.code, &app.focus, key.modifiers) {
+                // ── Power controls (F1=shutdown, F2=reboot) ──
+                (KeyCode::F(1), _, _) => {
+                    drop(terminal);
+                    disable_raw_mode()?;
+                    execute!(io::stdout(), LeaveAlternateScreen)?;
+                    std::process::Command::new("systemctl")
+                        .args(["poweroff"])
+                        .spawn()
+                        .ok();
+                    std::process::exit(0);
+                }
+                (KeyCode::F(2), _, _) => {
+                    drop(terminal);
+                    disable_raw_mode()?;
+                    execute!(io::stdout(), LeaveAlternateScreen)?;
+                    std::process::Command::new("systemctl")
+                        .args(["reboot"])
+                        .spawn()
+                        .ok();
+                    std::process::exit(0);
+                }
+
                 // ── Focus cycling ──
                 (KeyCode::Tab, _, _) => {
                     app.focus_next();

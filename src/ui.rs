@@ -80,7 +80,7 @@ pub fn render(f: &mut Frame, app: &App) {
         for (i, line) in app.plugin_lines.iter().enumerate() {
             let plug = Paragraph::new(Line::from(
                 Span::styled(format!("  {}", line), plug_color)
-            ));
+            )).alignment(Alignment::Center);
             f.render_widget(plug, chunks[idx_plugin_start + i]);
         }
     }
@@ -135,7 +135,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Hint ──
     let hint = Paragraph::new(Line::from(
-        Span::styled("  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next", hint_color)
+        Span::styled("  F1:Shutdown  F2:Reboot  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next", hint_color)
     ));
     f.render_widget(hint, chunks[idx_hint]);
 }
