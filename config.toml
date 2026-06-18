@@ -1,3 +1,7 @@
+[log]
+enable = false
+path = "/tmp/my-greeter.log"
+
 [ui]
 theme = "dark"
 

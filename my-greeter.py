@@ -23,6 +23,10 @@ CONFIG_PATHS = [
 ]
 
 DEFAULT_CONFIG = {
+    "log": {
+        "enable": False,      # 是否写日志文件
+        "path": "/tmp/my-greeter.log",  # 日志文件路径
+    },
     "ui": {
         "theme": "dark",
     },
@@ -51,6 +55,41 @@ def load_config() -> dict:
             with open(path, "rb") as f:
                 return tomllib.load(f)
     return DEFAULT_CONFIG
+
+
+# ─── 日志系统 ──────────────────────────────────────────
+
+_log_handle = None
+_log_enabled = False
+
+
+def init_log(config: dict):
+    """初始化日志（在主流程开始时调用一次）"""
+    global _log_handle, _log_enabled
+    cfg = config.get("log", {})
+    if not cfg.get("enable", False):
+        _log_enabled = False
+        return
+    path = Path(cfg.get("path", "/tmp/my-greeter.log"))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _log_handle = open(path, "a", encoding="utf-8")
+        _log_enabled = True
+    except Exception:
+        _log_enabled = False
+
+
+def log(level: str, msg: str):
+    """写入日志行。level: INFO / WARN / ERROR / DEBUG"""
+    if not _log_enabled or _log_handle is None:
+        return
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        _log_handle.write(f"[{ts}] [{level}] {msg}\n")
+        _log_handle.flush()
+    except Exception:
+        pass
 
 
 # ─── 主题系统 ──────────────────────────────────────────
@@ -230,7 +269,11 @@ def load_plugins() -> list[str]:
                     data = json.loads(line)
                     if "lines" in data:
                         plugin_lines.extend(data["lines"])
-            except (TimeoutExpired, CalledProcessError, json.JSONDecodeError, OSError):
+            except TimeoutExpired:
+                log("WARN", f"plugin timed out: {f.name}")
+                continue
+            except (CalledProcessError, json.JSONDecodeError, OSError):
+                log("WARN", f"plugin failed: {f.name}")
                 continue
     return plugin_lines
 
@@ -256,8 +299,10 @@ class GreetdClient:
     def __init__(self):
         sock_path = os.environ.get("GREETD_SOCK")
         if not sock_path:
+            log("ERROR", "GREETD_SOCK not set")
             print("ERROR: GREETD_SOCK not set", file=sys.stderr)
             sys.exit(1)
+        log("DEBUG", f"connecting to GREETD_SOCK={sock_path}")
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(sock_path)
 
@@ -317,6 +362,7 @@ def tui_login(config: dict):
 
     # 加载插件
     plugin_lines = load_plugins()
+    log("INFO", f"loaded {len(plugin_lines)} plugin lines")
 
     title = f"  {brand['title']}"
     sep = f"  {'─' * len(brand['title'])}"
@@ -357,7 +403,10 @@ def tui_login(config: dict):
         username = raw if raw else default_user
 
     if not username:
+        log("WARN", "empty username, exiting")
         return
+
+    log("INFO", f"login attempt: user={username}")
 
     # 连接 greetd
     client = GreetdClient()
@@ -384,9 +433,13 @@ def tui_login(config: dict):
                 answer = input(" " * offset + styled_msg)
             resp = client.post_auth_response(answer)
         elif resp["type"] == "error":
-            center_print(f"  Error: {resp.get('description', 'unknown')}", columns, theme["error"])
+            desc = resp.get('description', 'unknown')
+            log("WARN", f"auth error: {desc}")
+            center_print(f"  Error: {desc}", columns, theme["error"])
             client.close()
             return
+
+    log("INFO", f"auth success: user={username}")
 
     # 选择 session
     session_list = merge_sessions(sessions)
@@ -422,12 +475,18 @@ def tui_login(config: dict):
     except (ValueError, IndexError):
         selected = session_list[default_idx]
 
-    resp = client.start_session([selected["exec"]])
+    cmd = selected["exec"]
+    log("INFO", f"starting session: {cmd} for user={username}")
+
+    resp = client.start_session([cmd])
     if resp["type"] == "success":
+        log("INFO", f"session started, greeter exiting")
         client.close()
         os._exit(0)
     else:
-        center_print(f"  Error: {resp.get('description', 'start failed')}", columns, theme["error"])
+        desc = resp.get('description', 'start failed')
+        log("ERROR", f"start session failed: {desc}")
+        center_print(f"  Error: {desc}", columns, theme["error"])
         client.close()
 
 
@@ -435,12 +494,16 @@ def tui_login(config: dict):
 
 def main():
     config = load_config()
+    init_log(config)
+    log("INFO", "greeter started")
     try:
         tui_login(config)
     except KeyboardInterrupt:
+        log("INFO", "user cancelled (Ctrl+C)")
         print()
         sys.exit(0)
     except Exception as e:
+        log("ERROR", f"unhandled exception: {e}")
         print(f"\n  Error: {e}", file=sys.stderr)
         sys.exit(1)
 
