@@ -7,138 +7,135 @@ use ratatui::{
     Frame,
 };
 
-const FIELD_WIDTH: u16 = 48;
-
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.size();
 
-    // Layout: like Lemurs chunks
+    // 动态构建 constraints（参考 Lemurs 固定高度布局）
+    let n = app.plugin_lines.len();
+    let mut c = Vec::new();
+
+    // 0: title
+    c.push(Constraint::Length(1));
+    // 1..n: plugins (may be 0..0 if empty)
+    for _ in 0..n {
+        c.push(Constraint::Length(1));
+    }
+    // n+1: gap
+    c.push(Constraint::Length(1));
+    // n+2: session switcher
+    c.push(Constraint::Length(1));
+    // n+3: gap
+    c.push(Constraint::Length(1));
+    // n+4: username field (3 lines: top, content, bottom)
+    c.push(Constraint::Length(3));
+    // n+5: gap
+    c.push(Constraint::Length(1));
+    // n+6: password field (3 lines)
+    c.push(Constraint::Length(3));
+    // n+7: gap
+    c.push(Constraint::Length(1));
+    // n+8: hint bar
+    c.push(Constraint::Length(1));
+    // 剩余空间 → 自动居中
+    c.push(Constraint::Min(0));
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .horizontal_margin(2)
         .vertical_margin(1)
-        .constraints([
-            Constraint::Length(1),      // title
-            Constraint::Length(1),      // gap or plugin
-            Constraint::Length(1),      // plugin lines (or gap)
-            Constraint::Length(1),      // gap
-            Constraint::Length(1),      // session switcher
-            Constraint::Length(1),      // gap
-            Constraint::Length(3),      // username field
-            Constraint::Length(1),      // gap
-            Constraint::Length(3),      // password field
-            Constraint::Length(1),      // error message
-            Constraint::Length(1),      // hint bar
-            Constraint::Min(0),         // remaining
-        ])
+        .constraints(c)
         .split(area);
+
+    // 各个 widget 的 index
+    let idx_title = 0;
+    let idx_plugin_start = 1;
+    let idx_gap1 = n + 1;
+    let idx_session = n + 2;
+    let idx_gap2 = n + 3;
+    let idx_user = n + 4;
+    let idx_gap3 = n + 5;
+    let idx_pwd = n + 6;
+    let idx_gap4 = n + 7;
+    let idx_hint = n + 8;
 
     let title_color = Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::BOLD);
     let env_color = Style::default().fg(Color::DarkGray);
     let env_focused = Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD);
     let border_color = Style::default().fg(Color::White);
-    let border_focused = Style::default().fg(Color::from_u32(0xFFA500)); // orange
+    let border_focused = Style::default().fg(Color::from_u32(0xFFA500));
     let content_color = Style::default().fg(Color::White);
     let content_focused = Style::default().fg(Color::from_u32(0xFFA500));
     let hint_color = Style::default().fg(Color::DarkGray);
     let error_color = Style::default().fg(Color::Red).add_modifier(ratatui::style::Modifier::BOLD);
+    let plug_color = Style::default().fg(Color::Green);
 
     // ── Title ──
-    let title_text = format!("  {}", app.config.branding.title);
-    let title = Paragraph::new(Text::from(Line::from(Span::styled(title_text, title_color))))
-        .alignment(Alignment::Left);
-    f.render_widget(title, chunks[0]);
+    let title = Paragraph::new(Line::from(
+        Span::styled(format!("  {}", app.config.branding.title), title_color)
+    ));
+    f.render_widget(title, chunks[idx_title]);
 
     // ── Plugin lines ──
-    let plug_color = Style::default().fg(Color::Green);
     if !app.plugin_lines.is_empty() {
-        let plug_text: Vec<Line> = app.plugin_lines.iter()
-            .map(|l| Line::from(Span::styled(format!("  {}", l), plug_color)))
-            .collect();
-        let plug = Paragraph::new(Text::from(plug_text)).alignment(Alignment::Left);
-        f.render_widget(plug, chunks[2]);
+        for (i, line) in app.plugin_lines.iter().enumerate() {
+            let plug = Paragraph::new(Line::from(
+                Span::styled(format!("  {}", line), plug_color)
+            ));
+            f.render_widget(plug, chunks[idx_plugin_start + i]);
+        }
     }
 
-    // ── Session switcher ──
-    let is_sess_focused = app.focus == Focus::Session;
-    let sess = app.current_session();
-    let sess_style = if is_sess_focused { env_focused } else { env_color };
-    // Show: "< name >" centered
-    let sess_text = format!("  < {} >  ", sess.name);
-    let sess_para = Paragraph::new(Text::from(Line::from(Span::styled(sess_text, sess_style))))
-        .alignment(Alignment::Center);
-    f.render_widget(sess_para, chunks[4]);
+    // ── Session ──
+    let sess_sty = if app.focus == Focus::Session { env_focused } else { env_color };
+    let sess = Paragraph::new(Line::from(
+        Span::styled(format!("  < {} >  ", app.current_session().name), sess_sty)
+    )).alignment(Alignment::Center);
+    f.render_widget(sess, chunks[idx_session]);
 
-    // ── Username field ──
-    let is_user_focused = app.focus == Focus::Username;
-    let user_border = if is_user_focused { border_focused } else { border_color };
-    let user_content = if is_user_focused { content_focused } else { content_color };
-
-    let user_display = if app.username.is_empty() {
-        String::new()
-    } else {
-        app.username.clone()
-    };
-
-    let user_block = Block::default()
+    // ── Username ──
+    let u_focus = app.focus == Focus::Username;
+    let u_block = Block::default()
         .title(" Login ")
         .borders(Borders::ALL)
-        .border_style(user_border);
-
-    let user_para = Paragraph::new(Text::from(Line::from(
-        Span::styled(user_display.clone(), user_content)
-    )))
-    .block(user_block)
-    .alignment(Alignment::Left);
-    f.render_widget(user_para, chunks[6]);
-
-    // Set cursor position for username
-    if is_user_focused {
-        let cursor_x = chunks[6].x + 2 + user_display.len() as u16;
-        let cursor_y = chunks[6].y + 1;
-        f.set_cursor(cursor_x, cursor_y);
+        .border_style(if u_focus { border_focused } else { border_color });
+    let u_para = Paragraph::new(Line::from(
+        Span::styled(app.username.clone(), if u_focus { content_focused } else { content_color })
+    )).block(u_block);
+    f.render_widget(u_para, chunks[idx_user]);
+    if u_focus {
+        let x = chunks[idx_user].x + 2 + app.username.len() as u16;
+        let y = chunks[idx_user].y + 1;
+        f.set_cursor(x, y);
     }
 
-    // ── Password field ──
-    let is_pwd_focused = app.focus == Focus::Password;
-    let pwd_border = if is_pwd_focused { border_focused } else { border_color };
-    let pwd_content = if is_pwd_focused { content_focused } else { content_color };
-
-    let pwd_display: String = app.password.chars().map(|_| '*').collect();
-
-    let pwd_block = Block::default()
+    // ── Password ──
+    let p_focus = app.focus == Focus::Password;
+    let stars: String = app.password.chars().map(|_| '*').collect();
+    let p_block = Block::default()
         .title(" Password ")
         .borders(Borders::ALL)
-        .border_style(pwd_border);
-
-    let pwd_para = Paragraph::new(Text::from(Line::from(
-        Span::styled(pwd_display.clone(), pwd_content)
-    )))
-    .block(pwd_block)
-    .alignment(Alignment::Left);
-    f.render_widget(pwd_para, chunks[8]);
-
-    // Set cursor position for password
-    if is_pwd_focused {
-        let cursor_x = chunks[8].x + 2 + pwd_display.len() as u16;
-        let cursor_y = chunks[8].y + 1;
-        f.set_cursor(cursor_x, cursor_y);
+        .border_style(if p_focus { border_focused } else { border_color });
+    let p_para = Paragraph::new(Line::from(
+        Span::styled(stars.clone(), if p_focus { content_focused } else { content_color })
+    )).block(p_block);
+    f.render_widget(p_para, chunks[idx_pwd]);
+    if p_focus {
+        let x = chunks[idx_pwd].x + 2 + stars.len() as u16;
+        let y = chunks[idx_pwd].y + 1;
+        f.set_cursor(x, y);
     }
 
-    // ── Error message ──
+    // ── Error ──
     if !app.error_msg.is_empty() {
-        let err_para = Paragraph::new(Text::from(Line::from(
+        let err = Paragraph::new(Line::from(
             Span::styled(format!("  {}", app.error_msg), error_color)
-        )))
-        .alignment(Alignment::Left);
-        f.render_widget(err_para, chunks[9]);
+        ));
+        f.render_widget(err, chunks[idx_gap4]); // reuse gap4 as error slot
     }
 
-    // ── Hint bar ──
-    let hint_text = "  Tab:Focus  ←→:Session  Enter:Next";
-    let hint_para = Paragraph::new(Text::from(Line::from(
-        Span::styled(hint_text, hint_color)
-    )))
-    .alignment(Alignment::Left);
-    f.render_widget(hint_para, chunks[10]);
+    // ── Hint ──
+    let hint = Paragraph::new(Line::from(
+        Span::styled("  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next", hint_color)
+    ));
+    f.render_widget(hint, chunks[idx_hint]);
 }
