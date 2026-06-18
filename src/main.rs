@@ -68,9 +68,9 @@ fn run(
                     drop(terminal);
                     disable_raw_mode()?;
                     execute!(io::stdout(), LeaveAlternateScreen)?;
-                    std::process::Command::new("systemctl")
+                    std::process::Command::new("loginctl")
                         .args(["poweroff"])
-                        .spawn()
+                        .status()
                         .ok();
                     std::process::exit(0);
                 }
@@ -78,9 +78,9 @@ fn run(
                     drop(terminal);
                     disable_raw_mode()?;
                     execute!(io::stdout(), LeaveAlternateScreen)?;
-                    std::process::Command::new("systemctl")
+                    std::process::Command::new("loginctl")
                         .args(["reboot"])
-                        .spawn()
+                        .status()
                         .ok();
                     std::process::exit(0);
                 }
