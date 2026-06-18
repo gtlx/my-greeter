@@ -360,7 +360,7 @@ def tui_login(config: dict, preview: bool = False):
     title = f"  {brand.get('title', 'Welcome')}"
     sep = f"  {'─' * len(title)}"
 
-    ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 4
+    ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 6
     top_padding = max(0, (lines - ui_height) // 2)
 
     clear_screen()
@@ -375,8 +375,6 @@ def tui_login(config: dict, preview: bool = False):
     print()
 
     session_line = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 1
-    user_line = session_line + 1
-    pwd_line = user_line + 1
 
     # ---- session 选择 ----
     session_list = scan_sessions()
@@ -386,38 +384,56 @@ def tui_login(config: dict, preview: bool = False):
         return
 
     sess_idx = 0
-    # 从配置预填用户名
     default_user = auth_cfg.get("default_user", "")
-    username = default_user if not auth_cfg.get("auto_login") else default_user
+    username = default_user
     password = ""
-    field = "user" if not default_user else "password"  # 有默认用户则直接跳到密码
-    # 如果 auto_login 并且有默认用户，也先停在密码
+    # field: 0=session, 1=user, 2=password
+    field = 2 if default_user else 1
+    # 框中行号
+    box_top = session_line         # 上边框
+    box_sess = session_line + 1    # Session 行
+    box_user = session_line + 2    # User 行
+    box_pwd = session_line + 3     # Password 行
+    box_bot = session_line + 4     # 下边框
 
     def render_all():
-        # Session 行
         s = session_list[sess_idx]
-        text = f"  Session: {s['name']}  [\u2190 \u2192]"
-        move_to(session_line, 0)
-        print(" " * columns, end="")
-        move_to(session_line, 0)
-        center_print(text, columns, theme["session_default"] if sess_idx == 0 else theme["session_highlight"])
+        sess_text = f"Session: {s['name']}"
+        user_text = f"User: {username}"
+        stars = "*" * len(password)
+        pwd_text = f"Password: {stars}"
+
+        max_len = max(len(sess_text), len(user_text), len(pwd_text))
+        box_w = max_len + 6  # 边框 + 左右各2空格
+        left = max(0, (columns - box_w) // 2)
+        inner = box_w - 2  # 去掉两边边框后的宽度
+
+        # 上边框
+        move_to(box_top, left)
+        print("\u250c" + "\u2500" * (box_w - 2) + "\u2510")
+
+        def box_line(text, cursor, style):
+            padded = f"  {text}{cursor}".ljust(inner)
+            return styled(f"\u2502{padded}\u2502", style)
+
+        # Session 行
+        move_to(box_sess, left)
+        print(box_line(sess_text, "\u258c" if field == 0 else "  ",
+                       theme["session_highlight"] if field == 0 else theme["session_default"]))
 
         # User 行
-        user_text = f"  User: {username}"
-        cursor = "" if field != "user" else "\u258c"
-        move_to(user_line, 0)
-        print(" " * columns, end="")
-        move_to(user_line, 0)
-        center_print(user_text + cursor, columns, theme["label"] if not username else theme["input"])
+        move_to(box_user, left)
+        print(box_line(user_text, "\u258c" if field == 1 else " ",
+                       theme["label"] if field == 1 and not username else theme["input"] if field == 1 else ""))
 
         # Password 行
-        stars = "*" * len(password)
-        pwd_text = f"  Password: {stars}"
-        cursor = "" if field != "password" else "\u258c"
-        move_to(pwd_line, 0)
-        print(" " * columns, end="")
-        move_to(pwd_line, 0)
-        center_print(pwd_text + cursor, columns, theme["label"] if not password else theme["input"])
+        move_to(box_pwd, left)
+        print(box_line(pwd_text, "\u258c" if field == 2 else " ",
+                       theme["label"] if field == 2 and not password else theme["input"] if field == 2 else ""))
+
+        # 下边框
+        move_to(box_bot, left)
+        print("\u2514" + "\u2500" * (box_w - 2) + "\u2518")
 
     render_all()
 
@@ -431,31 +447,31 @@ def tui_login(config: dict, preview: bool = False):
             sess_idx = (sess_idx - 1) % len(session_list)
             render_all()
         elif key == "ENTER":
-            if field == "user":
-                if username:
-                    field = "password"
-                    render_all()
-                # 没输用户名就继续等
-            elif field == "password":
-                if password:
-                    break  # 提交
+            if field == 1 and username:
+                field = 2
+                render_all()
+            elif field == 2 and password:
+                break
+            elif field == 0:
+                field = 1
+                render_all()
         elif key == "TAB":
-            field = "password" if field == "user" else "user"
+            field = (field + 1) % 3
             render_all()
         elif key == "BACKSPACE":
-            if field == "user" and username:
+            if field == 1 and username:
                 username = username[:-1]
                 render_all()
-            elif field == "password" and password:
+            elif field == 2 and password:
                 password = password[:-1]
                 render_all()
         elif key == "q":
             return
         elif key and len(key) == 1 and key.isprintable():
-            if field == "user":
+            if field == 1:
                 username += key
                 render_all()
-            elif field == "password":
+            elif field == 2:
                 password += key
                 render_all()
 
@@ -465,11 +481,11 @@ def tui_login(config: dict, preview: bool = False):
 
     log("INFO", f"login attempt: user={username}")
 
-    # 清除 Session 箭头提示
-    move_to(session_line, 0)
-    print(" " * columns, end="")
-    move_to(session_line, 0)
-    center_print(f"  Session: {session_list[sess_idx]['name']}", columns, theme["session_default"] if sess_idx == 0 else theme["session_highlight"])
+    # 清除整个框
+    for row in range(box_top, box_bot + 1):
+        move_to(row, 0)
+        print(" " * columns)
+    move_to(box_top, 0)
 
     if preview:
         print()
