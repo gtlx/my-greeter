@@ -46,6 +46,10 @@ sudo systemctl enable --now greetd
 编辑 `config.toml`：
 
 ```toml
+[log]
+enable = false                # 开启日志
+path = "/tmp/my-greeter.log"   # 日志文件路径
+
 [auth]
 default_user = "gtlx"       # 默认用户名
 auto_login = false           # true 跳过用户名输入，直接输密码
@@ -68,6 +72,28 @@ session = "white"            # session 列表样式
 session_default = "cyan"     # 默认 session 样式
 select = "yellow"            # 选择提示样式
 ```
+
+### 日志
+
+默认不写文件。开启后输出到 `/tmp/` 下，重启自动清空。
+
+日志格式：
+```
+[2026-06-18 18:45:55] [INFO] greeter started
+[2026-06-18 18:45:55] [INFO] login attempt: user=gtlx
+[2026-06-18 18:45:55] [INFO] auth success: user=gtlx
+[2026-06-18 18:45:55] [INFO] starting session: niri-session
+[2026-06-18 18:45:55] [INFO] session started, greeter exiting
+```
+
+记录的事件：
+
+| 级别 | 记录内容 |
+|------|---------|
+| `INFO` | 启动、登录尝试、认证成功、session 启动 |
+| `WARN` | 插件超时/失败、空用户名、认证失败 |
+| `ERROR` | session 启动失败、未捕获异常 |
+| `DEBUG` | socket 连接信息 |
 
 ### 支持的颜色和属性
 
