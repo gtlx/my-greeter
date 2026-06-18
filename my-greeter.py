@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
 """
-my-greeter - 自写的 greetd greeter (前端)
-通信协议: 见 https://man.archlinux.org/man/greetd-ipc.7.en
+my-greeter - greetd greeter
 """
 
-import os
-import sys
-import json
-import struct
-import socket
-import tomllib
-import shutil
-import termios
-import tty
-import select
+import os, sys, json, struct, socket, tomllib, shutil, termios, tty, select
 from pathlib import Path
 import configparser
 
@@ -31,542 +21,325 @@ DEFAULT_CONFIG = {
     "branding": {"title": "Welcome"},
 }
 
-SESSION_DIRS = [
-    Path("/usr/share/wayland-sessions"),
-    Path("/usr/share/xsessions"),
-]
-
-
 def load_config() -> dict:
-    for path in CONFIG_PATHS:
-        if path.exists():
-            with open(path, "rb") as f:
+    for p in CONFIG_PATHS:
+        if p.exists():
+            with open(p, "rb") as f:
                 return tomllib.load(f)
     return DEFAULT_CONFIG
 
+# ─── 日志 ──────────────────────────────────────────────
 
-# ─── 日志系统 ──────────────────────────────────────────
+_log = None
+_log_en = False
 
-_log_handle = None
-_log_enabled = False
-
-
-def init_log(config: dict):
-    global _log_handle, _log_enabled
-    cfg = config.get("log", {})
-    if not cfg.get("enable", False):
-        _log_enabled = False
-        return
-    path = Path(cfg.get("path", "/tmp/my-greeter.log"))
+def init_log(c: dict):
+    global _log, _log_en
+    l = c.get("log", {})
+    if not l.get("enable", False):
+        _log_en = False; return
+    p = Path(l.get("path", "/tmp/my-greeter.log"))
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _log_handle = open(path, "a", encoding="utf-8")
-        _log_enabled = True
-    except Exception:
-        _log_enabled = False
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _log = open(p, "a", encoding="utf-8")
+        _log_en = True
+    except: _log_en = False
 
-
-def log(level: str, msg: str):
-    if not _log_enabled or _log_handle is None:
-        return
+def log(lv: str, msg: str):
+    if not _log_en or _log is None: return
     from datetime import datetime
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        _log_handle.write(f"[{ts}] [{level}] {msg}\n")
-        _log_handle.flush()
-    except Exception:
-        pass
+    _log.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [{lv}] {msg}\n")
+    _log.flush()
 
-
-# ─── 主题系统 ──────────────────────────────────────────
-
-ANSI_COLORS = {
-    "black": 30, "red": 31, "green": 32, "yellow": 33,
-    "blue": 34, "magenta": 35, "cyan": 36, "white": 37,
-    "bright_black": 90, "bright_red": 91, "bright_green": 92,
-    "bright_yellow": 93, "bright_blue": 94, "bright_magenta": 95,
-    "bright_cyan": 96, "bright_white": 97,
-}
-
-ANSI_ATTRS = {
-    "bold": 1, "dim": 2, "italic": 3, "underline": 4,
-    "blink": 5, "reverse": 7,
-}
+# ─── ANSI ──────────────────────────────────────────────
 
 RESET = "\033[0m"
+C = {"black":30,"red":31,"green":32,"yellow":33,"blue":34,"magenta":35,"cyan":36,"white":37,
+     "bright_black":90,"bright_red":91,"bright_green":92,"bright_yellow":93,
+     "bright_blue":94,"bright_magenta":95,"bright_cyan":96,"bright_white":97}
+A = {"bold":1,"dim":2,"italic":3,"underline":4}
 
+def style(s: str) -> str:
+    if not s or not s.strip(): return ""
+    c = []
+    for p in s.strip().lower().split():
+        if p in C: c.append(str(C[p]))
+        elif p in A: c.append(str(A[p]))
+    return "\033[" + ";".join(c) + "m" if c else ""
 
-def parse_style(style_str: str) -> str:
-    if not style_str or not style_str.strip():
-        return ""
-    parts = style_str.strip().lower().split()
-    codes = []
-    for p in parts:
-        if p in ANSI_COLORS:
-            codes.append(str(ANSI_COLORS[p]))
-        elif p in ANSI_ATTRS:
-            codes.append(str(ANSI_ATTRS[p]))
-    if not codes:
-        return ""
-    return "\033[" + ";".join(codes) + "m"
+def st(text: str, s: str) -> str:
+    a = style(s); return a + text + RESET if a else text
 
+# ─── 检测 ─────────────────────────────────────────────
 
-def styled(text: str, style: str) -> str:
-    ansi = parse_style(style)
-    if not ansi:
-        return text
-    return ansi + text + RESET
-
-
-DEFAULT_THEME = {
-    "title": "cyan bold",
-    "sep": "",
-    "plugin": "green",
-    "label": "yellow",
-    "input": "white",
-    "error": "red bold",
-    "session": "white",
-    "session_default": "cyan",
-    "session_highlight": "cyan bold",
-    "session_normal": "",
-    "user_highlight": "cyan bold",
-    "user_normal": "",
-}
-
-
-# ─── 自动检测桌面环境 ──────────────────────────────────
-
-def scan_sessions() -> list[dict]:
-    sessions = []
-    for dir_path in SESSION_DIRS:
-        if not dir_path.is_dir():
-            continue
-        session_type = dir_path.name.replace("-sessions", "")
-        for desktop_file in sorted(dir_path.glob("*.desktop")):
+def sessions() -> list:
+    r = []
+    for d in [Path("/usr/share/wayland-sessions"), Path("/usr/share/xsessions")]:
+        if not d.is_dir(): continue
+        t = d.name.replace("-sessions","")
+        for f in sorted(d.glob("*.desktop")):
             try:
-                parser = configparser.ConfigParser()
-                parser.read(desktop_file)
-                if "Desktop Entry" not in parser:
-                    continue
-                entry = parser["Desktop Entry"]
-                name = entry.get("Name", desktop_file.stem)
-                exec_cmd = entry.get("Exec", "")
-                if not exec_cmd:
-                    continue
-                sessions.append({
-                    "name": name,
-                    "exec": exec_cmd,
-                    "type": session_type,
-                })
-            except Exception:
-                continue
-    return sessions
+                p = configparser.ConfigParser(); p.read(f)
+                e = p["Desktop Entry"]
+                n = e.get("Name", f.stem); c = e.get("Exec","")
+                if c: r.append({"name":n,"exec":c,"type":t})
+            except: pass
+    return r
 
-
-# ─── 用户检测 ──────────────────────────────────────────
-
-EXCLUDED_USERS = {"nobody", "nobody", "nfsnobody", "guest"}
-
-
-def list_users(min_uid: int = 1000) -> list[str]:
-    users = []
+XU = {"nobody","nobody","nfsnobody","guest"}
+def users() -> list:
+    r = []
     try:
-        for line in Path("/etc/passwd").read_text().splitlines():
-            parts = line.split(":")
-            if len(parts) < 7:
-                continue
-            name, _, uid_str, _, _, _, shell = parts
-            try:
-                uid = int(uid_str)
-            except ValueError:
-                continue
-            if uid < min_uid or name in EXCLUDED_USERS:
-                continue
-            if shell in ("/usr/bin/nologin", "/bin/false", "/sbin/nologin"):
-                continue
-            users.append(name)
-    except Exception:
-        pass
-    return sorted(users)
+        for l in Path("/etc/passwd").read_text().splitlines():
+            p = l.split(":")
+            if len(p) < 7: continue
+            n, _, us, _, _, _, sh = p
+            try: uid = int(us)
+            except: continue
+            if uid < 1000 or n in XU: continue
+            if sh in ("/usr/bin/nologin","/bin/false","/sbin/nologin"): continue
+            r.append(n)
+    except: pass
+    return sorted(r)
 
+# ─── 插件 ─────────────────────────────────────────────
 
-# ─── 插件系统 ────────────────────────────────────────────
+PD = [Path.home()/".config"/"my-greeter"/"plugins", Path(__file__).parent/"plugins"]
 
-PLUGIN_DIRS = [
-    Path.home() / ".config" / "my-greeter" / "plugins",
-    Path(__file__).parent / "plugins",
-]
-
-
-def load_plugins() -> list[str]:
+def plugins() -> list:
     from subprocess import run, TimeoutExpired, CalledProcessError
-    plugin_lines = []
-    seen = set()
-    for dir_path in PLUGIN_DIRS:
-        if not dir_path.is_dir():
-            continue
-        for f in sorted(dir_path.iterdir()):
-            if f.name.startswith(".") or not os.access(f, os.X_OK):
-                continue
-            if f.name in seen:
-                continue
+    r = []; seen = set()
+    for d in PD:
+        if not d.is_dir(): continue
+        for f in sorted(d.iterdir()):
+            if f.name.startswith(".") or not os.access(f, os.X_OK): continue
+            if f.name in seen: continue
             seen.add(f.name)
             try:
-                r = run([f], capture_output=True, timeout=2, text=True)
-                for line in r.stdout.strip().split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    data = json.loads(line)
-                    if "lines" in data:
-                        plugin_lines.extend(data["lines"])
-            except TimeoutExpired:
-                log("WARN", f"plugin timed out: {f.name}")
-                continue
-            except (CalledProcessError, json.JSONDecodeError, OSError):
-                log("WARN", f"plugin failed: {f.name}")
-                continue
-    return plugin_lines
+                o = run([f], capture_output=True, timeout=2, text=True)
+                for l in o.stdout.strip().split("\n"):
+                    l = l.strip()
+                    if not l: continue
+                    d = json.loads(l)
+                    if "lines" in d: r.extend(d["lines"])
+            except (TimeoutExpired, CalledProcessError, json.JSONDecodeError, OSError):
+                log("WARN", f"plugin fail: {f.name}")
+    return r
 
+# ─── 终端 ─────────────────────────────────────────────
 
-# ─── 终端工具 ──────────────────────────────────────────
+def clear(): print("\033[2J\033[H", end="")
 
-def center_print(text: str, width: int, style: str = ""):
-    padding = max(0, (width - len(text)) // 2)
-    print(" " * padding + styled(text, style))
+# ─── 键盘 ─────────────────────────────────────────────
 
-
-def clear_screen():
-    print("\033[2J\033[H", end="")
-
-
-def move_to(row: int, col: int = 0):
-    print(f"\033[{row};{col}H", end="")
-
-
-def hide_cursor():
-    print("\033[?25l", end="")
-
-
-def show_cursor():
-    print("\033[?25h", end="")
-
-
-# ─── 键盘输入 ──────────────────────────────────────────
-
-def get_key(timeout: float | None = None) -> str | None:
+def get_key(t=None) -> str|None:
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        def _read(t=None):
-            if t is not None:
-                r, _, _ = select.select([fd], [], [], t)
-                if not r:
-                    return None
+        def _r(t2=None):
+            if t2 is not None:
+                r,_,_ = select.select([fd],[],[],t2)
+                if not r: return None
             return sys.stdin.read(1)
-        ch = _read(timeout)
-        if ch is None:
+        c = _r(t)
+        if c is None: return None
+        if c == "\033":
+            s1 = _r(0.05); s2 = _r(0.05) if s1 else None
+            if s1 is None: return "ESC"
+            if s2 is None: return None
+            co = s1 + s2
+            if co == "[A": return "UP"
+            if co == "[B": return "DOWN"
+            if co == "[C": return "RIGHT"
+            if co == "[D": return "LEFT"
             return None
-        if ch == "\033":
-            s1 = _read(0.05)
-            if s1 is None:
-                return "ESC"
-            s2 = _read(0.05)
-            if s2 is None:
-                return None
-            c = s1 + s2
-            if c == "[A": return "UP"
-            if c == "[B": return "DOWN"
-            if c == "[C": return "RIGHT"
-            if c == "[D": return "LEFT"
-            return None
-        elif ch in ("\r", "\n"):
-            return "ENTER"
-        elif ch in ("\x03",):
-            raise KeyboardInterrupt
-        elif ch in ("\x7f", "\b"):
-            return "BACKSPACE"
-        return ch
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        if c in ("\r","\n"): return "ENTER"
+        if c == "\t": return "TAB"
+        if c == "\x03": raise KeyboardInterrupt
+        if c in ("\x7f","\b"): return "BACKSPACE"
+        return c
+    finally: termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+# ─── greetd IPC ───────────────────────────────────────
 
-# ─── greetd IPC 协议 ───────────────────────────────────
-
-class GreetdClient:
+class G:
     def __init__(self):
-        sock_path = os.environ.get("GREETD_SOCK")
-        if not sock_path:
-            log("ERROR", "GREETD_SOCK not set")
-            print("ERROR: GREETD_SOCK not set", file=sys.stderr)
-            sys.exit(1)
-        log("DEBUG", f"connecting to GREETD_SOCK={sock_path}")
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(sock_path)
+        sp = os.environ.get("GREETD_SOCK")
+        if not sp: log("ERROR","GREETD_SOCK not set"); sys.exit(1)
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.s.connect(sp)
+    def _s(self, o: dict):
+        p = json.dumps(o).encode()
+        self.s.sendall(struct.pack("I", len(p)) + p)
+    def _r(self) -> dict:
+        d = self.s.recv(4)
+        if not d: return {"type":"error","description":"closed"}
+        l = struct.unpack("I", d)[0]; b = b""
+        while len(b) < l:
+            c = self.s.recv(l - len(b))
+            if not c: break
+            b += c
+        return json.loads(b.decode())
+    def cre(self, u: str) -> dict:
+        self._s({"type":"create_session","username":u}); return self._r()
+    def auth(self, r: str = None):
+        m = {"type":"post_auth_message_response"}
+        if r is not None: m["response"] = r
+        self._s(m); return self._r()
+    def start(self, cmd: list, env: list = None):
+        self._s({"type":"start_session","cmd":cmd,"env":env or []}); return self._r()
+    def close(self): self.s.close()
 
-    def _send(self, obj: dict):
-        payload = json.dumps(obj).encode("utf-8")
-        header = struct.pack("I", len(payload))
-        self.sock.sendall(header + payload)
+# ─── UI ───────────────────────────────────────────────
 
-    def _recv(self) -> dict:
-        raw_len = self.sock.recv(4)
-        if not raw_len:
-            return {"type": "error", "error_type": "error",
-                    "description": "connection closed"}
-        length = struct.unpack("I", raw_len)[0]
-        data = b""
-        while len(data) < length:
-            chunk = self.sock.recv(length - len(data))
-            if not chunk:
-                break
-            data += chunk
-        return json.loads(data.decode("utf-8"))
+TH = {
+    "title":"cyan bold", "plugin":"green",
+    "env":"dark gray", "env_on":"white bold",
+    "bdr":"white", "bdr_on":"orange",
+    "err":"red bold", "hint":"dark gray",
+}
 
-    def create_session(self, username: str) -> dict:
-        self._send({"type": "create_session", "username": username})
-        return self._recv()
+def ui(config: dict):
+    co, ro = shutil.get_terminal_size()
+    a = config.get("auth",{}); b = config.get("branding",{})
+    pl = plugins(); ss = sessions()
 
-    def post_auth_response(self, response: str = None):
-        msg = {"type": "post_auth_message_response"}
-        if response is not None:
-            msg["response"] = response
-        self._send(msg)
-        return self._recv()
+    si = 0; du = a.get("default_user","")
+    un = du; pw = ""; f = 2 if du else 1  # 0=sess 1=user 2=pwd
+    em = ""; fw = min(48, co - 6)
 
-    def start_session(self, cmd: list[str], env: list[str] = None):
-        self._send({"type": "start_session", "cmd": cmd, "env": env or []})
-        return self._recv()
-
-    def cancel_session(self):
-        self._send({"type": "cancel_session"})
-
-    def close(self):
-        self.sock.close()
-
-
-# ─── TUI ──────────────────────────────────────────────
-
-def tui_login(config: dict, preview: bool = False):
-    columns, lines = shutil.get_terminal_size()
-    auth_cfg = config.get("auth", {})
-    brand = config.get("branding", {})
-    theme = {**DEFAULT_THEME, **(config.get("theme") or {})}
-
-    plugin_lines = load_plugins()
-    log("INFO", f"loaded {len(plugin_lines)} plugin lines")
-
-    title = f"  {brand.get('title', 'Welcome')}"
-    sep = f"  {'─' * len(title)}"
-
-    ui_height = 3 + 2 + (1 if plugin_lines else 0) + len(plugin_lines) + 6
-    top_padding = max(0, (lines - ui_height) // 2)
-
-    clear_screen()
-    print("\n" * top_padding, end="")
-
-    center_print(title, columns, theme["title"])
-    center_print(sep, columns, theme["sep"])
-    if plugin_lines:
+    def render():
+        nonlocal em
+        clear()
+        print(st(f"  {b.get('title','Welcome')}", TH["title"]))
+        print(st(f"  {'─'*len(b.get('title','Welcome'))}", ""))
+        if pl:
+            print()
+            for l in pl: print(st(f"  {l}", TH["plugin"]))
         print()
-        for line in plugin_lines:
-            center_print(f"  {line}", columns, theme["plugin"])
-    print()
 
-    session_line = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 1
+        # ── Session ──
+        s = ss[si]
+        txt = f"  <  {s['name']}  >"
+        print(st(txt, TH["env_on"] if f==0 else TH["env"]))
 
-    # ---- session 选择 ----
-    session_list = scan_sessions()
-    if not session_list:
-        log("ERROR", "no sessions found")
-        center_print("  No sessions available", columns, theme["error"])
-        return
+        print()
 
-    sess_idx = 0
-    default_user = auth_cfg.get("default_user", "")
-    username = default_user
-    password = ""
-    # field: 0=session, 1=user, 2=password
-    field = 2 if default_user else 1
-    # 框中行号
-    box_top = session_line         # 上边框
-    box_sess = session_line + 1    # Session 行
-    box_user = session_line + 2    # User 行
-    box_pwd = session_line + 3     # Password 行
-    box_bot = session_line + 4     # 下边框
+        # ── User field ──
+        on = f==1
+        bc = TH["bdr_on"] if on else TH["bdr"]
+        disp = un + ("\u258c" if on else " ")
+        pad = fw - 3 - len(un) - (1 if on else 0)
+        btop = "\u250c\u2500 Login " + "\u2500" * (fw - 10) + "\u2510"
+        bmid = f"\u2502 {disp}{' '*max(0,pad)}\u2502"
+        bbot = "\u2514" + "\u2500" * (fw - 2) + "\u2518"
+        print(st(btop, bc))
+        print(bmid if not on else st(bmid, TH["bdr_on"]))
+        print(st(bbot, bc))
 
-    def render_all():
-        s = session_list[sess_idx]
-        sess_text = f"Session: {s['name']}"
-        user_text = f"User: {username}"
-        stars = "*" * len(password)
-        pwd_text = f"Password: {stars}"
+        print()
 
-        max_len = max(len(sess_text), len(user_text), len(pwd_text))
-        box_w = max_len + 6  # 边框 + 左右各2空格
-        left = max(0, (columns - box_w) // 2)
-        inner = box_w - 2  # 去掉两边边框后的宽度
+        # ── Password field ──
+        on2 = f==2
+        bc2 = TH["bdr_on"] if on2 else TH["bdr"]
+        stars = "*" * len(pw)
+        disp2 = stars + ("\u258c" if on2 else " ")
+        pad2 = fw - 3 - len(stars) - (1 if on2 else 0)
+        btop2 = "\u250c\u2500 Password " + "\u2500" * (fw - 14) + "\u2510"
+        bmid2 = f"\u2502 {disp2}{' '*max(0,pad2)}\u2502"
+        bbot2 = "\u2514" + "\u2500" * (fw - 2) + "\u2518"
+        print(st(btop2, bc2))
+        print(bmid2 if not on2 else st(bmid2, TH["bdr_on"]))
+        print(st(bbot2, bc2))
 
-        # 上边框
-        move_to(box_top, left)
-        print("\u250c" + "\u2500" * (box_w - 2) + "\u2510")
+        # error
+        if em:
+            print()
+            print(st(f"  {em}", TH["err"]))
 
-        def box_line(text, cursor, style):
-            padded = f"  {text}{cursor}".ljust(inner)
-            return styled(f"\u2502{padded}\u2502", style)
+        print()
+        print(st("  F1:Shutdown  F2:Reboot  Tab:Focus  \u2190\u2192:Session", TH["hint"]))
 
-        # Session 行
-        move_to(box_sess, left)
-        print(box_line(sess_text, "\u258c" if field == 0 else "  ",
-                       theme["session_highlight"] if field == 0 else theme["session_default"]))
-
-        # User 行
-        move_to(box_user, left)
-        print(box_line(user_text, "\u258c" if field == 1 else " ",
-                       theme["label"] if field == 1 and not username else theme["input"] if field == 1 else ""))
-
-        # Password 行
-        move_to(box_pwd, left)
-        print(box_line(pwd_text, "\u258c" if field == 2 else " ",
-                       theme["label"] if field == 2 and not password else theme["input"] if field == 2 else ""))
-
-        # 下边框
-        move_to(box_bot, left)
-        print("\u2514" + "\u2500" * (box_w - 2) + "\u2518")
-
-    render_all()
+    render()
 
     while True:
-        key = get_key()
+        k = get_key()
+        if k == "TAB":
+            f = (f + 1) % 3; em = ""; render()
+        elif k in ("RIGHT","DOWN"):
+            if f == 0: si = (si + 1) % len(ss); render()
+        elif k in ("LEFT","UP"):
+            if f == 0: si = (si - 1) % len(ss); render()
+        elif k == "ENTER":
+            if f == 1 and un: f = 2; render()
+            elif f == 2 and pw: break
+        elif k == "BACKSPACE":
+            if f == 1 and un: un = un[:-1]; render()
+            elif f == 2 and pw: pw = pw[:-1]; render()
+        elif k == "ESC":
+            if f != 0: f = 0; render()
+        elif k == "q": return
+        elif k and len(k)==1 and k.isprintable():
+            if f == 1: un += k; render()
+            elif f == 2: pw += k; render()
 
-        if key == "RIGHT":
-            sess_idx = (sess_idx + 1) % len(session_list)
-            render_all()
-        elif key == "LEFT":
-            sess_idx = (sess_idx - 1) % len(session_list)
-            render_all()
-        elif key == "ENTER":
-            if field == 1 and username:
-                field = 2
-                render_all()
-            elif field == 2 and password:
-                break
-            elif field == 0:
-                field = 1
-                render_all()
-        elif key == "TAB":
-            field = (field + 1) % 3
-            render_all()
-        elif key == "BACKSPACE":
-            if field == 1 and username:
-                username = username[:-1]
-                render_all()
-            elif field == 2 and password:
-                password = password[:-1]
-                render_all()
-        elif key == "q":
-            return
-        elif key and len(key) == 1 and key.isprintable():
-            if field == 1:
-                username += key
-                render_all()
-            elif field == 2:
-                password += key
-                render_all()
+    if not un or not pw:
+        log("WARN","empty"); return
+    log("INFO", f"login: {un}")
 
-    if not username or not password:
-        log("WARN", "empty user or password")
-        return
-
-    log("INFO", f"login attempt: user={username}")
-
-    # 清除整个框
-    for row in range(box_top, box_bot + 1):
-        move_to(row, 0)
-        print(" " * columns)
-    move_to(box_top, 0)
-
-    if preview:
+    if "--preview" in sys.argv:
+        clear()
+        print(st("  [Preview] OK", TH["title"]))
+        print(st(f"  Session: {ss[si]['name']}", TH["plugin"]))
+        print(st(f"  User: {un}", TH["plugin"]))
         print()
-        center_print("  [Preview] Auth success!", columns, theme["session_default"])
-        center_print(f"  [Preview] Starting session: {session_list[sess_idx]['name']}", columns, theme["plugin"])
-        center_print("  Press any key to exit preview", columns, theme["label"])
-        get_key()
         return
 
-    # ---- 连接 greetd 并认证 ----
-    client = GreetdClient()
-    resp = client.create_session(username)
-
-    while resp["type"] != "success":
-        if resp["type"] == "auth_message":
-            msg_type = resp.get("auth_message_type", "visible")
-            msg_text = resp.get("auth_message", "")
-            if msg_type == "secret":
-                resp = client.post_auth_response(password)
-            elif msg_type in ("info", "error"):
-                stl = theme["error"] if msg_type == "error" else theme["label"]
-                center_print(f"  [{msg_type}] {msg_text}", columns, stl)
-                resp = client.post_auth_response()
-                continue
+    # ── Auth ──
+    c = G(); r = c.cre(un)
+    while r["type"] != "success":
+        if r["type"] == "auth_message":
+            mt = r.get("auth_message_type","visible")
+            t = r.get("auth_message","")
+            if mt == "secret":
+                r = c.auth(pw)
+            elif mt in ("info","error"):
+                em = f"[{mt}] {t}"; render()
+                r = c.auth()
             else:
-                styled_msg = styled(f"  {msg_text}", theme["label"])
-                offset = max(0, (columns - len(f"  {msg_text}")) // 2)
-                answer = input(" " * offset + styled_msg)
-                resp = client.post_auth_response(answer)
-        elif resp["type"] == "error":
-            desc = resp.get("description", "unknown")
-            log("WARN", f"auth error: {desc}")
-            center_print(f"  Error: {desc}", columns, theme["error"])
-            client.close()
-            return
+                r = c.auth(input())
+        elif r["type"] == "error":
+            em = r.get("description","auth error")
+            log("WARN",em); render(); pw = ""; f = 2
+            while True:
+                k2 = get_key()
+                if k2 == "ENTER" and pw: break
+                elif k2 == "BACKSPACE" and pw: pw = pw[:-1]; render()
+                elif k2 and len(k2)==1 and k2.isprintable(): pw += k2; render()
+                elif k2 == "TAB": f = (f+1)%3; render()
+                elif k2 == "q": c.close(); return
+            r = c.auth(pw)
 
-    log("INFO", f"auth success: user={username}")
-
-    # 清除 session 选择提示行
-    move_to(session_line, 0)
-    print(" " * columns, end="")
-    move_to(session_line, 0)
-
-    # 启动选中的 session
-    selected = session_list[sess_idx]
-    cmd = selected["exec"]
-    log("INFO", f"starting session: {cmd} for user={username}")
-
-    resp = client.start_session([cmd])
-    if resp["type"] == "success":
-        log("INFO", "session started, greeter exiting")
-        client.close()
-        os._exit(0)
+    log("INFO","auth ok")
+    sel = ss[si]
+    clear()
+    print(st(f"  Starting {sel['name']}...", TH["title"]))
+    r = c.start([sel["exec"]])
+    if r["type"] == "success":
+        log("INFO","done"); c.close(); os._exit(0)
     else:
-        desc = resp.get("description", "start failed")
-        log("ERROR", f"start session failed: {desc}")
-        center_print(f"  Error: {desc}", columns, theme["error"])
-        client.close()
+        em = f"Start fail: {r.get('description','?')}"
+        render(); c.close()
 
-
-# ─── 入口 ──────────────────────────────────────────────
+# ─── 入口 ─────────────────────────────────────────────
 
 def main():
-    preview = "--preview" in sys.argv
-    config = load_config()
-    init_log(config)
-    if preview:
-        log("INFO", "preview mode")
-    else:
-        log("INFO", "greeter started")
-    try:
-        tui_login(config, preview=preview)
-    except KeyboardInterrupt:
-        log("INFO", "user cancelled (Ctrl+C)")
-        print()
-        sys.exit(0)
+    c = load_config(); init_log(c); log("INFO","start")
+    try: ui(c)
+    except KeyboardInterrupt: print()
     except Exception as e:
-        log("ERROR", f"unhandled exception: {e}")
-        print(f"\n  Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
+        log("ERROR",str(e)); print(f"\n  Error: {e}", file=sys.stderr); sys.exit(1)
 
 if __name__ == "__main__":
     main()
