@@ -317,13 +317,12 @@ def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | 
 
     hide_cursor()
     while True:
-        save_line = top
         for i, u in enumerate(users):
-            move_to(save_line + i + 1, 0)
+            move_to(top + i + 1, 0)
             style = hl if i == idx else nm
             prefix = " ▸ " if i == idx else "   "
             center_print(f"{prefix}{u}", columns, style)
-        move_to(save_line + len(users) + 1, 0)
+        move_to(top + len(users) + 1, 0)
         center_print("  [↑↓ 切换   Enter 确认]", columns, lbl)
 
         key = get_key()
@@ -338,6 +337,16 @@ def select_user(users: list[str], theme: dict, columns: int, top: int) -> str | 
             show_cursor()
             return None
     show_cursor()
+
+
+def restore_tty():
+    """恢复 TTY 到 cooked 模式（getpass/input 可能搞乱终端状态）"""
+    import termios
+    fd = sys.stdin.fileno()
+    try:
+        termios.tcsetattr(fd, termios.TCSADRAIN, termios.tcgetattr(fd))
+    except Exception:
+        pass
 
 
 def select_session_with_timeout(
@@ -577,29 +586,46 @@ def tui_login(config: dict):
 
     log("INFO", f"auth success: user={username}")
 
-    # ---- session 选择（带超时，默认自动启动）----
+    # ---- session 选择（一行内联，← → 切换）----
     session_list = scan_sessions()
     if not session_list:
         center_print("  No sessions available", columns, theme["error"])
         client.close()
         return
 
-    current_top = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 2
-    selected = select_session_with_timeout(session_list, theme, columns, current_top, timeout_s=3)
+    restore_tty()
 
-    if selected is None:
-        center_print("  Cancelled", columns, theme["error"])
-        client.close()
-        return
+    idx = 0
+    session_line = top_padding + 3 + (1 if plugin_lines else 0) + len(plugin_lines) + 2
 
-    # 清除 session 选择提示
-    for i in range(len(session_list) + 3):
-        move_to(current_top + i, 0)
-        print(" " * columns)
+    while True:
+        s = session_list[idx]
+        text = f"  Session: {s['name']}  [\u2190 \u2192 switch  Enter launch]"
+        move_to(session_line, 0)
+        print(" " * columns, end="")
+        move_to(session_line, 0)
+        center_print(text, columns, theme["session_default"] if idx == 0 else theme["session_highlight"])
+
+        key = get_key()
+        if key == "RIGHT":
+            idx = (idx + 1) % len(session_list)
+        elif key == "LEFT":
+            idx = (idx - 1) % len(session_list)
+        elif key == "ENTER":
+            selected = session_list[idx]
+            break
+        elif key == "q":
+            center_print("  Cancelled", columns, theme["error"])
+            client.close()
+            return
+
+    # 清除 session 行
+    move_to(session_line, 0)
+    print(" " * columns, end="")
+    move_to(session_line, 0)
 
     cmd = selected["exec"]
     log("INFO", f"starting session: {cmd} for user={username}")
-    center_print(f"  Starting {selected['name']}...", columns, theme["session_default"])
 
     resp = client.start_session([cmd])
     if resp["type"] == "success":
