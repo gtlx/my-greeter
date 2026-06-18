@@ -1,0 +1,23 @@
+# my-greeter 配置文件
+# 路径优先级：
+#   1. /etc/my-greeter/config.toml
+#   2. ~/.config/my-greeter/config.toml
+#   3. 脚本所在目录的 config.toml
+
+[ui]
+theme = "dark"
+show_clock = true
+time_format = "%H:%M:%S"
+
+[sessions]
+default = "niri-session"
+list = [
+  "niri-session",
+  "sway",
+  "Hyprland",
+  "bash",
+]
+
+[branding]
+title = "gtlx's machine"
+greeting = "Enter password for %s"
