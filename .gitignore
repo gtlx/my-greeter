@@ -1,4 +1,3 @@
+target/
 __pycache__/
 *.pyc
-
-# 用户插件不提交
