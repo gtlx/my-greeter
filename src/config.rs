@@ -67,21 +67,37 @@ fn default_title() -> String {
     "Welcome".to_string()
 }
 
+/// 从 exe 路径往上找 project 根目录（target/release/my-greeter → 往上2级）
+pub fn project_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let parent = exe.parent()?;        // target/release/
+    let grand = parent.parent()?;       // target/
+    Some(grand.parent()?.to_path_buf()) // 项目根目录
+}
+
 impl Config {
     pub fn load() -> Self {
-        let paths = [
-            Path::new("/etc/my-greeter/config.toml"),
-            &dirs::config_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("my-greeter/config.toml"),
-            &Path::new("config.toml"),
-        ];
+        let mut paths = Vec::new();
+
+        paths.push(PathBuf::from("/etc/my-greeter/config.toml"));
+
+        if let Some(cfg_dir) = dirs::config_dir() {
+            paths.push(cfg_dir.join("my-greeter/config.toml"));
+        }
+
+        paths.push(PathBuf::from("config.toml"));
+
+        // exe 同项目根目录（解决 greeter 用户 $HOME 不对的问题）
+        if let Some(root) = project_root() {
+            paths.push(root.join("config.toml"));
+        }
 
         for p in &paths {
             if p.exists() {
-                let content = std::fs::read_to_string(p).unwrap_or_default();
-                if let Ok(cfg) = toml::from_str(&content) {
-                    return cfg;
+                if let Ok(content) = std::fs::read_to_string(p) {
+                    if let Ok(cfg) = toml::from_str(&content) {
+                        return cfg;
+                    }
                 }
             }
         }
@@ -89,7 +105,6 @@ impl Config {
     }
 }
 
-// For dirs::config_dir fallback
 mod dirs {
     use std::path::PathBuf;
 

@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use crate::config;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -41,7 +42,6 @@ pub fn load_plugins() -> Vec<String> {
                 continue;
             }
 
-            // Try to run the plugin
             let mut child = match Command::new(&path)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
@@ -51,13 +51,11 @@ pub fn load_plugins() -> Vec<String> {
                 Err(_) => continue,
             };
 
-            // Wait with timeout
             let start = std::time::Instant::now();
             let timeout = Duration::from_secs(2);
             let output = loop {
                 match child.try_wait() {
                     Ok(Some(_)) => {
-                        // Process finished
                         if let Some(mut out) = child.stdout.take() {
                             let mut buf = String::new();
                             let _ = out.read_to_string(&mut buf);
@@ -98,14 +96,21 @@ pub fn load_plugins() -> Vec<String> {
 fn plugin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    if let Ok(home) = std::env::var("HOME") {
+    // ~/.config/my-greeter/plugins/
+    if let Some(home) = std::env::var("HOME").ok() {
         dirs.push(PathBuf::from(home).join(".config/my-greeter/plugins"));
     }
 
+    // <exe_dir>/plugins/ (target/release/plugins/)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             dirs.push(parent.join("plugins"));
         }
+    }
+
+    // 项目根目录下的 plugins/（解决 greeter 用户 $HOME 不对的问题）
+    if let Some(root) = config::project_root() {
+        dirs.push(root.join("plugins"));
     }
 
     dirs
