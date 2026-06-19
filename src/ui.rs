@@ -10,24 +10,25 @@ use ratatui::{
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.size();
 
-    // ── 动态 constraints：上下 Min(0) 平分空间 → 真正居中 ──
+    // ── 动态 constraints ──
     let n = app.plugin_lines.len();
     let mut c = Vec::new();
 
-    c.push(Constraint::Min(0));          // 0: 上半弹性空间
-    c.push(Constraint::Length(1));       // 1: title
+    c.push(Constraint::Min(0));          // 0: 上半弹性
+    c.push(Constraint::Length(1));       // 1: title（居中）
+    c.push(Constraint::Length(1));       // 2: separator（─横线）
     for _ in 0..n {
-        c.push(Constraint::Length(1));   // 2..n+1: plugins (动态)
+        c.push(Constraint::Length(1));   // 3..n+2: plugins
     }
-    c.push(Constraint::Length(1));       // n+2: gap
-    c.push(Constraint::Length(1));       // n+3: session
-    c.push(Constraint::Length(1));       // n+4: gap
-    c.push(Constraint::Length(3));       // n+5: username field
-    c.push(Constraint::Length(1));       // n+6: gap
-    c.push(Constraint::Length(3));       // n+7: password field
-    c.push(Constraint::Length(1));       // n+8: gap/error
-    c.push(Constraint::Length(1));       // n+9: hint
-    c.push(Constraint::Min(0));          // n+10: 下半弹性空间
+    c.push(Constraint::Length(1));       // n+3: gap
+    c.push(Constraint::Length(1));       // n+4: session
+    c.push(Constraint::Length(1));       // n+5: gap
+    c.push(Constraint::Length(3));       // n+6: username
+    c.push(Constraint::Length(1));       // n+7: gap
+    c.push(Constraint::Length(3));       // n+8: password
+    c.push(Constraint::Length(1));       // n+9: gap/error
+    c.push(Constraint::Length(1));       // n+10: hint
+    c.push(Constraint::Min(0));          // n+11: 下半弹性
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -36,17 +37,19 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints(c)
         .split(area);
 
-    // widget index (基于 n 偏移)
+    // widget index
     let idx_title = 1;
-    let idx_plugin_start = 2;
-    let idx_session = n + 3;
-    let idx_user = n + 5;
-    let idx_pwd = n + 7;
-    let idx_err = n + 8;
-    let idx_hint = n + 9;
+    let idx_sep = 2;
+    let idx_plugin_start = 3;
+    let idx_session = n + 4;
+    let idx_user = n + 6;
+    let idx_pwd = n + 8;
+    let idx_err = n + 9;
+    let idx_hint = n + 10;
 
     // ── 颜色 ──
     let title_c = Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::BOLD);
+    let sep_c = Style::default().fg(Color::DarkGray);
     let env_c = Style::default().fg(Color::DarkGray);
     let env_f = Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD);
     let bdr_c = Style::default().fg(Color::White);
@@ -57,11 +60,17 @@ pub fn render(f: &mut Frame, app: &App) {
     let err_c = Style::default().fg(Color::Red).add_modifier(ratatui::style::Modifier::BOLD);
     let plug_c = Style::default().fg(Color::Green);
 
-    // ── Title ──
+    // ── Title（居中） ──
     let title = Paragraph::new(Line::from(
-        Span::styled(format!("  {}", app.config.branding.title), title_c)
-    ));
+        Span::styled(&app.config.branding.title, title_c)
+    )).alignment(Alignment::Center);
     f.render_widget(title, chunks[idx_title]);
+
+    // ── Separator（横线） ──
+    let sep_w = chunks[idx_sep].width as usize;
+    let sep_line = "─".repeat(sep_w);
+    let sep = Paragraph::new(Line::from(Span::styled(sep_line, sep_c)));
+    f.render_widget(sep, chunks[idx_sep]);
 
     // ── Plugins ──
     for (i, line) in app.plugin_lines.iter().enumerate() {
