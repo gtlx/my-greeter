@@ -135,7 +135,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Hint ──
     let hint = Paragraph::new(Line::from(
-        Span::styled("  F1:Shutdown  F2:Reboot  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next", hint_color)
+        Span::styled("  F1:Shutdown  F2:Reboot  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next  Ctrl+U:Clear", hint_color)
     ));
     f.render_widget(hint, chunks[idx_hint]);
 }

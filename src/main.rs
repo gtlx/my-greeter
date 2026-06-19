@@ -16,22 +16,16 @@ use std::io;
 fn main() -> io::Result<()> {
     let cfg = config::Config::load();
 
-    // Init log
     if cfg.log.enable {
-        if let Ok(file) = std::fs::OpenOptions::new()
+        std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&cfg.log.path)
-        {
-            // Simple log: just write to file directly later
-            let _ = file;
-        }
+            .ok();
     }
 
-    // Check if preview mode
     let preview = std::env::args().any(|a| a == "--preview");
 
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -40,11 +34,8 @@ fn main() -> io::Result<()> {
     terminal.hide_cursor()?;
 
     let mut app = App::new(cfg);
-
-    // Main loop
     let result = run(&mut terminal, &mut app, preview);
 
-    // Cleanup
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -57,21 +48,18 @@ fn run(
     app: &mut App,
     preview: bool,
 ) -> io::Result<()> {
-    // Initial draw
     terminal.draw(|f| ui::render(f, app))?;
 
     while app.running {
         if let Event::Key(key) = event::read()? {
             match (key.code, &app.focus, key.modifiers) {
-                // ── Power controls (F1=shutdown, F2=reboot) ──
+                // ── Power: F1=shutdown, F2=reboot ──
                 (KeyCode::F(1), _, _) => {
                     drop(terminal);
                     disable_raw_mode()?;
                     execute!(io::stdout(), LeaveAlternateScreen)?;
                     std::process::Command::new("systemctl")
-                        .args(["poweroff"])
-                        .status()
-                        .ok();
+                        .args(["poweroff"]).status().ok();
                     std::process::exit(0);
                 }
                 (KeyCode::F(2), _, _) => {
@@ -79,100 +67,65 @@ fn run(
                     disable_raw_mode()?;
                     execute!(io::stdout(), LeaveAlternateScreen)?;
                     std::process::Command::new("systemctl")
-                        .args(["reboot"])
-                        .status()
-                        .ok();
+                        .args(["reboot"]).status().ok();
                     std::process::exit(0);
                 }
 
-                // ── Focus cycling ──
-                (KeyCode::Tab, _, _) => {
-                    app.focus_next();
-                }
-                (KeyCode::BackTab, _, _) | (KeyCode::Tab, _, KeyModifiers::SHIFT) => {
-                    app.focus_prev();
-                }
+                // ── Focus: Tab/Up/Down (同 Lemurs) ──
+                (KeyCode::Tab, _, _) => app.focus_next(),
+                (KeyCode::Down, _, _) => app.focus_next(),
+                (KeyCode::BackTab, _, _) | (KeyCode::Up, _, _) => app.focus_prev(),
+                (KeyCode::Tab, _, KeyModifiers::SHIFT) => app.focus_prev(),
 
-                // ── Session switching ──
-                (KeyCode::Left, Focus::Session, _) => {
-                    app.prev_session();
-                }
-                (KeyCode::Right, Focus::Session, _) => {
-                    app.next_session();
-                }
+                // ── Session: ← →  (同 Lemurs: Left/Right) ──
+                (KeyCode::Left, _, _) if app.focus == Focus::Session => app.prev_session(),
+                (KeyCode::Right, _, _) if app.focus == Focus::Session => app.next_session(),
 
                 // ── Enter ──
-                (KeyCode::Enter, Focus::Username, _) => {
-                    if !app.username.is_empty() {
-                        app.focus = Focus::Password;
-                    }
+                (KeyCode::Enter, Focus::Session, _) => app.focus = Focus::Username,
+                (KeyCode::Enter, Focus::Username, _) if !app.username.is_empty() => {
+                    app.focus = Focus::Password;
                 }
                 (KeyCode::Enter, Focus::Password, _) => {
                     if !app.password.is_empty() {
                         if preview {
                             app.error_msg = "[Preview] Auth would proceed now".to_string();
-                        } else {
-                            match crate::ipc::GreetdClient::connect() {
-                                Ok(mut client) => {
-                                    match app.submit(&mut client) {
-                                        Ok(()) => {
-                                            if app.authenticated {
-                                                match app.launch(&mut client) {
-                                                    Ok(()) => {}
-                                                    Err(e) => {
-                                                        app.error_msg = format!("Launch error: {}", e);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            app.error_msg = e;
-                                            app.password.clear();
-                                        }
+                        } else if let Ok(mut client) = crate::ipc::GreetdClient::connect() {
+                            match app.submit(&mut client) {
+                                Ok(()) if app.authenticated => {
+                                    if let Err(e) = app.launch(&mut client) {
+                                        app.error_msg = format!("Launch error: {}", e);
                                     }
                                 }
-                                Err(e) => {
-                                    app.error_msg = e;
-                                }
+                                Err(e) => { app.error_msg = e; app.password.clear(); }
+                                _ => {}
                             }
+                        } else {
+                            app.error_msg = "Cannot connect to greetd".to_string();
                         }
                     }
                 }
-                (KeyCode::Enter, Focus::Session, _) => {
-                    app.focus = Focus::Username;
-                }
 
-                // ── Esc ──
-                (KeyCode::Esc, Focus::Session, _) => {
-                    if preview {
-                        app.running = false;
-                    }
-                }
-                (KeyCode::Esc, _, _) => {
-                    app.focus = Focus::Session;
-                }
+                // ── Esc: 回到 Session / 退出预览 ──
+                (KeyCode::Esc, Focus::Session, _) if preview => app.running = false,
+                (KeyCode::Esc, _, _) => app.focus = Focus::Session,
 
                 // ── Quit ──
-                (KeyCode::Char('q'), _, _) => {
-                    app.running = false;
-                }
+                (KeyCode::Char('q'), Focus::Session, _) => app.running = false,
 
-                // ── Backspace ──
-                (KeyCode::Backspace, _, _) => {
-                    app.backspace();
-                }
+                // ── 文本编辑键 (同 Lemurs) ──
+                (KeyCode::Backspace, _, _) => app.backspace(),
+                (KeyCode::Char('h'), _, KeyModifiers::CONTROL) => app.backspace(), // Ctrl+H
+                (KeyCode::Char('u'), _, KeyModifiers::CONTROL) => app.clear_field(), // Ctrl+U
+                (KeyCode::Char('l'), _, KeyModifiers::CONTROL) => app.clear_field(), // Ctrl+L
 
-                // ── Type characters ──
-                (KeyCode::Char(c), _, _) => {
-                    app.type_char(c);
-                }
+                // ── 普通字符输入 ──
+                (KeyCode::Char(c), _, _) => app.type_char(c),
 
                 _ => {}
             }
-
             terminal.draw(|f| ui::render(f, app))?;
         }
     }
-
     Ok(())
 }

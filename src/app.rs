@@ -148,12 +148,16 @@ impl App {
 
     pub fn backspace(&mut self) {
         match self.focus {
-            Focus::Username => {
-                self.username.pop();
-            }
-            Focus::Password => {
-                self.password.pop();
-            }
+            Focus::Username => { self.username.pop(); }
+            Focus::Password => { self.password.pop(); }
+            _ => {}
+        }
+    }
+
+    pub fn clear_field(&mut self) {
+        match self.focus {
+            Focus::Username => self.username.clear(),
+            Focus::Password => self.password.clear(),
             _ => {}
         }
     }
