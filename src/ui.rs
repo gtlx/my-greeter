@@ -59,10 +59,10 @@ pub fn render(f: &mut Frame, app: &App) {
     let sess_st = config::parse_style(&th.session);
     let sess_f_st = config::parse_style(&th.session_focus);
 
-    // ── Title ──
-    let title = Paragraph::new(Line::from(Span::styled(
-        &app.config.branding.title, title_st
-    ))).alignment(Alignment::Center);
+    // ── Title（带装饰符号） ──
+    let title_text = format!("—— {} ——", app.config.branding.title);
+    let title = Paragraph::new(Line::from(Span::styled(&title_text, title_st)))
+        .alignment(Alignment::Center);
     f.render_widget(title, chunks[idx_title]);
 
     // ── Separator ──
