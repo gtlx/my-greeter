@@ -1,7 +1,7 @@
 use crate::app::{App, Focus};
+use crate::config;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
@@ -13,10 +13,9 @@ pub fn render(f: &mut Frame, app: &App) {
     // ── 动态 constraints ──
     let n = app.plugin_lines.len();
     let mut c = Vec::new();
-
     c.push(Constraint::Min(0));          // 0: 上半弹性
-    c.push(Constraint::Length(1));       // 1: title（居中）
-    c.push(Constraint::Length(1));       // 2: separator（─横线）
+    c.push(Constraint::Length(1));       // 1: title
+    c.push(Constraint::Length(1));       // 2: separator
     for _ in 0..n {
         c.push(Constraint::Length(1));   // 3..n+2: plugins
     }
@@ -37,7 +36,6 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints(c)
         .split(area);
 
-    // widget index
     let idx_title = 1;
     let idx_sep = 2;
     let idx_plugin_start = 3;
@@ -47,41 +45,41 @@ pub fn render(f: &mut Frame, app: &App) {
     let idx_err = n + 9;
     let idx_hint = n + 10;
 
-    // ── 颜色 ──
-    let title_c = Style::default().fg(Color::Cyan).add_modifier(ratatui::style::Modifier::BOLD);
-    let sep_c = Style::default().fg(Color::DarkGray);
-    let env_c = Style::default().fg(Color::DarkGray);
-    let env_f = Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD);
-    let bdr_c = Style::default().fg(Color::White);
-    let bdr_f = Style::default().fg(Color::from_u32(0xFFA500));
-    let txt_c = Style::default().fg(Color::White);
-    let txt_f = Style::default().fg(Color::from_u32(0xFFA500));
-    let hint_c = Style::default().fg(Color::DarkGray);
-    let err_c = Style::default().fg(Color::Red).add_modifier(ratatui::style::Modifier::BOLD);
-    let plug_c = Style::default().fg(Color::Green);
+    // ── 从配置读取主题 ──
+    let th = &app.config.theme;
+    let title_st = config::parse_style(&th.title);
+    let sep_st = config::parse_style(&th.separator);
+    let bdr_st = config::parse_style(&th.border);
+    let bdr_f_st = config::parse_style(&th.border_focus);
+    let txt_st = config::parse_style(&th.text);
+    let txt_f_st = config::parse_style(&th.text_focus);
+    let plug_st = config::parse_style(&th.plugin);
+    let hint_st = config::parse_style(&th.hint);
+    let err_st = config::parse_style(&th.error);
+    let sess_st = config::parse_style(&th.session);
+    let sess_f_st = config::parse_style(&th.session_focus);
 
-    // ── Title（居中） ──
-    let title = Paragraph::new(Line::from(
-        Span::styled(&app.config.branding.title, title_c)
-    )).alignment(Alignment::Center);
+    // ── Title ──
+    let title = Paragraph::new(Line::from(Span::styled(
+        &app.config.branding.title, title_st
+    ))).alignment(Alignment::Center);
     f.render_widget(title, chunks[idx_title]);
 
-    // ── Separator（横线） ──
+    // ── Separator ──
     let sep_w = chunks[idx_sep].width as usize;
-    let sep_line = "─".repeat(sep_w);
-    let sep = Paragraph::new(Line::from(Span::styled(sep_line, sep_c)));
+    let sep = Paragraph::new(Line::from(Span::styled("─".repeat(sep_w), sep_st)));
     f.render_widget(sep, chunks[idx_sep]);
 
     // ── Plugins ──
     for (i, line) in app.plugin_lines.iter().enumerate() {
         let plug = Paragraph::new(Line::from(
-            Span::styled(format!("  {}", line), plug_c)
+            Span::styled(format!("  {}", line), plug_st)
         )).alignment(Alignment::Center);
         f.render_widget(plug, chunks[idx_plugin_start + i]);
     }
 
     // ── Session ──
-    let s_sty = if app.focus == Focus::Session { env_f } else { env_c };
+    let s_sty = if app.focus == Focus::Session { sess_f_st } else { sess_st };
     let sess = Paragraph::new(Line::from(
         Span::styled(format!("  < {} >  ", app.current_session().name), s_sty)
     )).alignment(Alignment::Center);
@@ -89,13 +87,10 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Username ──
     let u_on = app.focus == Focus::Username;
-    let u_block = Block::default()
-        .title(" Login ")
-        .borders(Borders::ALL)
-        .border_style(if u_on { bdr_f } else { bdr_c });
-    let u_para = Paragraph::new(Line::from(
-        Span::styled(app.username.clone(), if u_on { txt_f } else { txt_c })
-    )).block(u_block);
+    let u_bdr = if u_on { bdr_f_st } else { bdr_st };
+    let u_txt = if u_on { txt_f_st } else { txt_st };
+    let u_block = Block::default().title(" Login ").borders(Borders::ALL).border_style(u_bdr);
+    let u_para = Paragraph::new(Line::from(Span::styled(app.username.clone(), u_txt))).block(u_block);
     f.render_widget(u_para, chunks[idx_user]);
     if u_on {
         f.set_cursor(chunks[idx_user].x + 2 + app.username.len() as u16, chunks[idx_user].y + 1);
@@ -103,14 +98,11 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Password ──
     let p_on = app.focus == Focus::Password;
+    let p_bdr = if p_on { bdr_f_st } else { bdr_st };
+    let p_txt = if p_on { txt_f_st } else { txt_st };
     let stars: String = app.password.chars().map(|_| '*').collect();
-    let p_block = Block::default()
-        .title(" Password ")
-        .borders(Borders::ALL)
-        .border_style(if p_on { bdr_f } else { bdr_c });
-    let p_para = Paragraph::new(Line::from(
-        Span::styled(stars.clone(), if p_on { txt_f } else { txt_c })
-    )).block(p_block);
+    let p_block = Block::default().title(" Password ").borders(Borders::ALL).border_style(p_bdr);
+    let p_para = Paragraph::new(Line::from(Span::styled(stars.clone(), p_txt))).block(p_block);
     f.render_widget(p_para, chunks[idx_pwd]);
     if p_on {
         f.set_cursor(chunks[idx_pwd].x + 2 + stars.len() as u16, chunks[idx_pwd].y + 1);
@@ -118,15 +110,16 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // ── Error ──
     if !app.error_msg.is_empty() {
-        let err = Paragraph::new(Line::from(
-            Span::styled(format!("  {}", app.error_msg), err_c)
-        ));
+        let err = Paragraph::new(Line::from(Span::styled(
+            format!("  {}", app.error_msg), err_st
+        )));
         f.render_widget(err, chunks[idx_err]);
     }
 
     // ── Hint ──
-    let hint = Paragraph::new(Line::from(
-        Span::styled("  F1:Shutdown  F2:Reboot  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next  Ctrl+U:Clear", hint_c)
-    ));
+    let hint = Paragraph::new(Line::from(Span::styled(
+        "  F1:Shutdown  F2:Reboot  Tab:Focus  \u{2190}\u{2192}:Session  Enter:Next  Ctrl+U:Clear",
+        hint_st,
+    )));
     f.render_widget(hint, chunks[idx_hint]);
 }

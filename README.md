@@ -1,25 +1,35 @@
 # my-greeter
 
-自写的 greetd greeter（前端）。
+自写的 greetd greeter（Rust 版）。
 
 ## 结构
 
 ```
-my-greeter.py       ← 主程序
-config.toml         ← 配置文件
-plugins/
-├── clock.py        ← 示例插件：时钟
-└── sysinfo.py      ← 示例插件：系统信息
+my-greeter/
+├── Cargo.toml
+├── config.toml         ← 配置文件
+├── plugins/
+│   ├── clock.py        ← 时钟插件
+│   └── sysinfo.py      ← 系统信息插件
+└── src/
+    ├── main.rs         ← 入口 + 事件循环
+    ├── app.rs          ← 状态机
+    ├── config.rs       ← 配置 + 主题
+    ├── ipc.rs          ← greetd IPC 协议
+    ├── plugins.rs      ← 插件系统
+    └── ui.rs           ← ratatui 渲染
 ```
 
 ## 快速开始
 
-### 1. 安装 greetd 并配置
+### 1. 安装 greetd
 
 ```bash
 sudo pacman -S greetd
 sudo setfacl -m u:greeter:x /home/gtlx
 ```
+
+### 2. 配置 greetd
 
 编辑 `/etc/greetd/config.toml`：
 
@@ -28,125 +38,97 @@ sudo setfacl -m u:greeter:x /home/gtlx
 vt = 1
 
 [default_session]
-command = "/home/gtlx/软件/my-greeter/my-greeter.py"
+command = "/home/gtlx/软件/my-greeter/target/release/my-greeter"
 user = "greeter"
 ```
 
-### 2. 启用
+### 3. 编译
+
+```bash
+cd /home/gtlx/软件/my-greeter
+cargo build --release
+```
+
+### 4. 预览
+
+```bash
+./target/release/my-greeter --preview
+```
+
+### 5. 启用
 
 ```bash
 sudo systemctl disable --now lemurs
 sudo systemctl enable --now greetd
 ```
 
-按 `Ctrl+Alt+F1` 测试。
-
 ## 配置
 
 编辑 `config.toml`：
 
 ```toml
-[log]
-enable = false                # 开启日志
-path = "/tmp/my-greeter.log"   # 日志文件路径
-
 [auth]
-default_user = "gtlx"       # 默认用户名
+default_user = "gtlx"       # 默认用户名，自动填入
 auto_login = false           # true 跳过用户名输入
 
 [branding]
-title = "gtlx's machine"    # 标题
+title = "gtlx's machine"    # 顶部标题
 
 [theme]
 title = "cyan bold"          # 标题样式
-sep = ""                     # 分隔线样式
-plugin = "green"             # 插件输出样式
-label = "yellow"             # 提示文字样式
-input = "white"              # 输入文字样式
-error = "red bold"           # 错误提示样式
-session_highlight = "cyan bold"  # session 高亮样式
-session_normal = ""              # session 普通样式
-user_highlight = "cyan bold"     # 用户选择高亮样式
-user_normal = ""                 # 用户选择普通样式
+separator = "dark gray"      # 标题下方横线
+border = "white"             # 输入框边框（未聚焦）
+border_focus = "#FFA500"     # 输入框边框（聚焦时，支持 hex 色）
+text = "white"               # 输入文字（未聚焦）
+text_focus = "#FFA500"       # 输入文字（聚焦时）
+plugin = "green"             # 插件输出文字
+hint = "dark gray"           # 底部快捷键提示
+error = "red bold"           # 错误提示
+session = "dark gray"       # Session 切换器（未聚焦）
+session_focus = "white bold" # Session 切换器（聚焦时）
 ```
 
-### 登录流程
+### 支持的样式
 
-启动后同时显示三行：
+**颜色名：** `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`,
+`dark_gray`, `gray`, `light_red`, `light_green`, `light_yellow`, `light_blue`,
+`light_magenta`, `light_cyan`, `orange`
 
-```
-  Session: Niri  [← →]     ← 方向键随时切换
-  User:                     ← Tab 切换焦点，输入用户名
-  Password: ****            ← 每输入一个字符显示一个 *
-```
+**Hex 色：** `#FFA500`, `#1a1a2e` 等任何 6 位 RGB
+
+**修饰符：** `bold`, `dim`, `italic`, `underline`
+
+组合写法：`"cyan bold"`, `"white bold"`, `"#FFA500 bold"`
+
+## 操作
 
 | 按键 | 作用 |
 |------|------|
-| `←` `→` | 切换 session（任何时候都生效） |
-| `Tab` | 切换输入焦点（User ↔ Password） |
-| 普通字符 | 输入到当前焦点字段 |
-| `Backspace` | 删除当前字段最后一个字符 |
-| `Enter` | Password 字段有内容时提交认证 |
-
-配置 `default_user` 时自动填入用户名，光标跳到密码字段。
-
-### 预览模式
-
-在桌面终端中直接预览界面效果，无需登出登录：
-
-```bash
-python3 my-greeter.py --preview
-```
-
-显示完整 UI，方向键切换、输入都可用，最后不真正连接 greetd。
-
-### 日志
-
-默认不写文件。开启后输出到 `/tmp/` 下，重启自动清空。
-
-日志格式：
-```
-[2026-06-18 18:45:55] [INFO] greeter started
-[2026-06-18 18:45:55] [INFO] login attempt: user=gtlx
-[2026-06-18 18:45:55] [INFO] auth success: user=gtlx
-[2026-06-18 18:45:55] [INFO] starting session: niri-session
-[2026-06-18 18:45:55] [INFO] session started, greeter exiting
-```
-
-记录的事件：
-
-| 级别 | 记录内容 |
-|------|---------|
-| `INFO` | 启动、登录尝试、认证成功、session 启动 |
-| `WARN` | 插件超时/失败、空用户名、认证失败 |
-| `ERROR` | session 启动失败、未捕获异常 |
-| `DEBUG` | socket 连接信息 |
-
-### 支持的颜色和属性
-
-**颜色：** `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`
-**亮色：** `bright_black`, `bright_red`, `bright_green`, `bright_yellow`, `bright_blue`, `bright_magenta`, `bright_cyan`, `bright_white`
-**属性：** `bold`, `dim`, `italic`, `underline`, `blink`, `reverse`
-
-组合写法：`"cyan bold"`, `"yellow underline"`, `"bright_white bold"`
+| `Tab` / `↓` | 下一个焦点 |
+| `↑` / `Shift+Tab` | 上一个焦点 |
+| `←` `→` | 切换 Session |
+| `Enter` | 确认 / 跳转下一字段 |
+| `Esc` | 回到 Session 行 |
+| `Ctrl+U` / `Ctrl+L` | 清空当前输入 |
+| `Ctrl+H` / `Backspace` | 删除上一个字符 |
+| `F1` | 关机 |
+| `F2` | 重启 |
+| `q` | 退出 greeter |
 
 ## 插件
 
-插件是在登录界面**启动时执行一次**的可执行文件，输出内容会显示在标题下方。
-
-### 插件协议
-
-插件**启动时往 stdout 输出一行 JSON**：
+插件是可执行文件，启动时执行一次，输出 JSON 到 stdout：
 
 ```json
-{"name":"插件名","lines":["第一行","第二行"]}
+{"name":"clock","lines":["14:30:00"]}
 ```
+
+放在 `~/.config/my-greeter/plugins/` 或项目 `plugins/` 目录。
 
 ### 示例：shell 插件
 
 ```bash
 #!/bin/bash
-# ~/.config/my-greeter/plugins/clock.sh
 echo '{"name":"clock","lines":["'$(date '+%H:%M:%S')'"]}'
 ```
 
@@ -158,28 +140,3 @@ import json
 from datetime import datetime
 print(json.dumps({"name":"clock","lines":[datetime.now().strftime("%H:%M:%S")]}))
 ```
-
-### 示例：Rust / Go / C / 任意语言
-
-只要能生成可执行文件、输出一行 JSON 到 stdout 就行。
-
-### 插件目录
-
-| 目录 | 说明 |
-|------|------|
-| `~/.config/my-greeter/plugins/` | 用户自己的插件 |
-| 脚本同目录下的 `plugins/` | 项目自带的示例插件 |
-
-### 安装插件
-
-```bash
-cp my-plugin.sh ~/.config/my-greeter/plugins/
-chmod +x ~/.config/my-greeter/plugins/my-plugin.sh
-sudo systemctl restart greetd
-```
-
-插件出错（超时、非 JSON、返回值非 0）会被**静默跳过**，不影响登录。
-
-## 原理
-
-通过 `$GREETD_SOCK` 找到 greetd 的 Unix socket，按 IPC 协议发 JSON 消息完成登录。
