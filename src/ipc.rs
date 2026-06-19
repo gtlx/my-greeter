@@ -19,11 +19,13 @@ pub enum Request {
         env: Option<Vec<String>>,
     },
     #[serde(rename = "cancel_session")]
+    #[allow(dead_code)]
     CancelSession,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
+#[allow(dead_code)]
 pub enum Response {
     #[serde(rename = "success")]
     Success,
@@ -104,6 +106,7 @@ impl GreetdClient {
         self.recv()
     }
 
+    #[allow(dead_code)]
     pub fn cancel(&mut self) -> Result<Response, String> {
         self.send(&Request::CancelSession)?;
         self.recv()

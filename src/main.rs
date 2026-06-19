@@ -55,7 +55,7 @@ fn run(
             match (key.code, &app.focus, key.modifiers) {
                 // ── Power: F1=shutdown, F2=reboot ──
                 (KeyCode::F(1), _, _) => {
-                    drop(terminal);
+                    let _ = terminal;
                     disable_raw_mode()?;
                     execute!(io::stdout(), LeaveAlternateScreen)?;
                     std::process::Command::new("systemctl")
@@ -63,7 +63,7 @@ fn run(
                     std::process::exit(0);
                 }
                 (KeyCode::F(2), _, _) => {
-                    drop(terminal);
+                    let _ = terminal;
                     disable_raw_mode()?;
                     execute!(io::stdout(), LeaveAlternateScreen)?;
                     std::process::Command::new("systemctl")
@@ -72,10 +72,9 @@ fn run(
                 }
 
                 // ── Focus: Tab/Up/Down (同 Lemurs) ──
+                (KeyCode::BackTab, _, _) | (KeyCode::Up, _, _) | (KeyCode::Tab, _, KeyModifiers::SHIFT) => app.focus_prev(),
                 (KeyCode::Tab, _, _) => app.focus_next(),
                 (KeyCode::Down, _, _) => app.focus_next(),
-                (KeyCode::BackTab, _, _) | (KeyCode::Up, _, _) => app.focus_prev(),
-                (KeyCode::Tab, _, KeyModifiers::SHIFT) => app.focus_prev(),
 
                 // ── Session: ← →  (同 Lemurs: Left/Right) ──
                 (KeyCode::Left, _, _) if app.focus == Focus::Session => app.prev_session(),

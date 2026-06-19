@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct Config {
@@ -37,6 +37,7 @@ pub struct AuthConfig {
     #[serde(default)]
     pub default_user: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub auto_login: bool,
 }
 
