@@ -1,3 +1,4 @@
+use crate::app::{PluginBlock, PluginPosition};
 use serde::Deserialize;
 use crate::config;
 use std::path::PathBuf;
@@ -10,11 +11,13 @@ struct PluginOutput {
     #[allow(dead_code)]
     name: Option<String>,
     lines: Option<Vec<String>>,
+    #[serde(default)]
+    position: Option<String>,
 }
 
-pub fn load_plugins() -> Vec<String> {
+pub fn load_plugins() -> Vec<PluginBlock> {
     let dirs = plugin_dirs();
-    let mut results = Vec::new();
+    let mut results: Vec<PluginBlock> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     for dir in &dirs {
@@ -83,7 +86,12 @@ pub fn load_plugins() -> Vec<String> {
                     }
                     if let Ok(po) = serde_json::from_str::<PluginOutput>(line) {
                         if let Some(lines) = po.lines {
-                            results.extend(lines);
+                            let position = match po.position.as_deref() {
+                                Some("left") => PluginPosition::Left,
+                                Some("right") => PluginPosition::Right,
+                                _ => PluginPosition::Center,
+                            };
+                            results.push(PluginBlock { lines, position });
                         }
                     }
                 }

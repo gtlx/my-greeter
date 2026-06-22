@@ -51,7 +51,7 @@ def main():
     colon_on = int(ss) % 2 == 0
 
     lines = build_clock(hh, mm, ss, colon_on)
-    print(json.dumps({"name": "clock", "lines": lines}))
+    print(json.dumps({"name": "clock", "lines": lines, "position": "center"}))
 
 
 if __name__ == "__main__":

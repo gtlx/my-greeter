@@ -82,6 +82,14 @@ pub struct Theme {
     pub session: String,
     #[serde(default = "sf_default")]
     pub session_focus: String,
+    #[serde(default = "panel_title_default")]
+    pub panel_title: String,
+    #[serde(default = "accent_default")]
+    pub accent: String,
+    #[serde(default)]
+    pub background: String,
+    #[serde(default = "layout_default")]
+    pub layout: String,
 }
 
 fn t_default() -> String { "white".to_string() }
@@ -92,6 +100,9 @@ fn g_default() -> String { "green".to_string() }
 fn h_default() -> String { "dark gray".to_string() }
 fn er_default() -> String { "red bold".to_string() }
 fn sf_default() -> String { "white bold".to_string() }
+fn panel_title_default() -> String { "cyan bold".to_string() }
+fn accent_default() -> String { "#FFA500".to_string() }
+fn layout_default() -> String { "auto".to_string() }
 
 impl Default for Theme {
     fn default() -> Self {
@@ -107,6 +118,10 @@ impl Default for Theme {
             error: "red bold".to_string(),
             session: "dark gray".to_string(),
             session_focus: "white bold".to_string(),
+            panel_title: "cyan bold".to_string(),
+            accent: "#FFA500".to_string(),
+            background: String::new(),
+            layout: "auto".to_string(),
         }
     }
 }

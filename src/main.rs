@@ -112,6 +112,9 @@ fn run(
                 // ── Quit ──
                 (KeyCode::Char('q'), Focus::Session, _) => app.running = false,
 
+                // ── 密码可见切换 ──
+                (KeyCode::Char('t'), _, KeyModifiers::CONTROL) => app.password_visible = !app.password_visible,
+
                 // ── 文本编辑键 (同 Lemurs) ──
                 (KeyCode::Backspace, _, _) => app.backspace(),
                 (KeyCode::Char('h'), _, KeyModifiers::CONTROL) => app.backspace(), // Ctrl+H

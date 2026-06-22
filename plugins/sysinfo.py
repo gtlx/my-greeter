@@ -13,4 +13,4 @@ hostname = Path("/etc/hostname").read_text().strip()
 load = Path("/proc/loadavg").read_text().split()[0]
 
 line = f"{hostname} | load: {load}"
-print(json.dumps({"name": "sysinfo", "lines": [line]}))
+print(json.dumps({"name": "sysinfo", "lines": [line], "position": "left"}))

@@ -10,6 +10,8 @@ auto_login = false
 title = "gtlx's machine"
 
 [theme]
+# 布局模式: "auto"=根据宽度自适应, "horizontal"=始终水平, "vertical"=始终垂直
+layout = "auto"
 title = "cyan bold"
 separator = "dark gray"
 border = "white"
@@ -21,3 +23,7 @@ hint = "dark gray"
 error = "red bold"
 session = "dark gray"
 session_focus = "white bold"
+panel_title = "cyan bold"
+accent = "#FFA500"
+# 背景填充: ""=无, "dark gray"=灰色点阵, "none"=无
+background = ""

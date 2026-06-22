@@ -9,6 +9,19 @@ pub enum Focus {
     Password,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PluginPosition {
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone)]
+pub struct PluginBlock {
+    pub lines: Vec<String>,
+    pub position: PluginPosition,
+}
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub name: String,
@@ -21,8 +34,9 @@ pub struct App {
     pub session_idx: usize,
     pub username: String,
     pub password: String,
+    pub password_visible: bool,
     pub focus: Focus,
-    pub plugin_lines: Vec<String>,
+    pub plugins: Vec<PluginBlock>,
     pub error_msg: String,
     pub running: bool,
     pub authenticated: bool,
@@ -39,7 +53,7 @@ impl App {
             Focus::Password
         };
 
-        let plugin_lines = crate::plugins::load_plugins();
+        let plugins = crate::plugins::load_plugins();
 
         Self {
             config,
@@ -47,8 +61,9 @@ impl App {
             session_idx: 0,
             username: default_user,
             password: String::new(),
+            password_visible: false,
             focus,
-            plugin_lines,
+            plugins,
             error_msg: String::new(),
             running: true,
             authenticated: false,
