@@ -8,12 +8,12 @@ use ratatui::{
     Frame,
 };
 
-const SQ: &str = "▪";
+const BULLET: &str = "*";
+const CURSOR: &str = "▌";
+const SQ: &str = "#";
 const ARROW_L: &str = "◀";
 const ARROW_R: &str = "▶";
-const ICON_USER: &str = "👤";
-const ICON_KEY: &str = "🔑";
-const ICON_SESSION: &str = "⊞";
+const WARN: &str = "!";
 
 /// 绘制带 rounded 边框的面板
 fn rounded_block<'a>(title: &str, style: Style) -> Block<'a> {
@@ -229,7 +229,7 @@ fn render_branding_panel(f: &mut Frame, area: Rect, _app: &App, ctx: &RenderCont
     } else {
         // 没有插件时显示问候语
         if y < bottom {
-            let greeting = format!(" {} Welcome ", ICON_USER);
+            let greeting = " Welcome ".to_string();
             let p = Paragraph::new(Line::from(Span::styled(greeting, ctx.title_st)))
                 .alignment(Alignment::Center);
             f.render_widget(p, Rect::new(inner.x, y, inner.width, 1));
@@ -273,9 +273,9 @@ fn render_login_panel(f: &mut Frame, area: Rect, app: &App, ctx: &RenderContext,
     let s_sty = if s_on { ctx.sess_f_st } else { ctx.sess_st };
 
     let session_text = if s_on {
-        format!(" {} {} {} {} {}  ", ARROW_L, ICON_SESSION, session.name, ARROW_R, SQ)
+        format!(" {} {} {} {}  ", ARROW_L, session.name, ARROW_R, SQ)
     } else {
-        format!("   {} {}   ", ICON_SESSION, session.name)
+        format!("   {}   ", session.name)
     };
 
     let session_block = if s_on {
@@ -314,10 +314,10 @@ fn render_login_panel(f: &mut Frame, area: Rect, app: &App, ctx: &RenderContext,
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(u_bdr)
-        .title(format!(" {} Login name ", ICON_USER))
+        .title(" Login name ")
         .title_style(if u_on { ctx.accent_st } else { ctx.bdr_st });
 
-    let cursor_char = if u_on { "▌" } else { "" };
+    let cursor_char = if u_on { CURSOR } else { "" };
     let u_text = format!(" {} {}", display_user, cursor_char);
     let u_para = Paragraph::new(Line::from(Span::styled(u_text, u_txt)))
         .block(u_block);
@@ -342,19 +342,19 @@ fn render_login_panel(f: &mut Frame, area: Rect, app: &App, ctx: &RenderContext,
     } else if app.password_visible {
         app.password.clone()
     } else {
-        app.password.chars().map(|_| '●').collect::<String>()
+        app.password.chars().map(|_| BULLET).collect::<String>()
     };
 
-    let vis_indicator = if app.password_visible { " 👁 " } else { "" };
+    let vis_indicator = if app.password_visible { " 👁" } else { "" };
 
     let p_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(p_bdr)
-        .title(format!(" {} Password {}", ICON_KEY, vis_indicator))
+        .title(format!("Password{}", vis_indicator))
         .title_style(if p_on { ctx.accent_st } else { ctx.bdr_st });
 
-    let cursor_char = if p_on { "▌" } else { "" };
+    let cursor_char = if p_on { CURSOR } else { "" };
     let p_text = format!(" {} {}", display_pwd, cursor_char);
     let p_para = Paragraph::new(Line::from(Span::styled(p_text, p_txt)))
         .block(p_block);
@@ -364,7 +364,7 @@ fn render_login_panel(f: &mut Frame, area: Rect, app: &App, ctx: &RenderContext,
         let vis_len = if app.password_visible {
             app.password.chars().count()
         } else {
-            app.password.len() // each char → ● (1 wide)
+            app.password.len()
         };
         f.set_cursor(
             content_area.x + 2 + vis_len as u16,
@@ -375,7 +375,7 @@ fn render_login_panel(f: &mut Frame, area: Rect, app: &App, ctx: &RenderContext,
 
     // ── Error ──
     if !app.error_msg.is_empty() && y < content_area.bottom() {
-        let err_text = format!(" ⚠ {}", app.error_msg);
+        let err_text = format!(" {} {}", WARN, app.error_msg);
         let err = Paragraph::new(Line::from(Span::styled(err_text, ctx.err_st)))
             .alignment(Alignment::Center);
         f.render_widget(err, Rect::new(content_area.x, y, content_area.width, 1));
