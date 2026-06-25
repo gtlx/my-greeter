@@ -197,6 +197,8 @@ impl App {
                             Ok(())
                         }
                         crate::ipc::Response::Error { description, .. } => {
+                            // Cancel the session so retry can create a new one
+                            let _ = client.cancel();
                             Err(description.unwrap_or_else(|| "auth error".to_string()))
                         }
                         crate::ipc::Response::AuthMessage { .. } => {
@@ -209,6 +211,7 @@ impl App {
                                     Ok(())
                                 }
                                 crate::ipc::Response::Error { description, .. } => {
+                                    let _ = client.cancel();
                                     Err(description.unwrap_or_else(|| "auth error".to_string()))
                                 }
                                 _ => Err("unexpected response".to_string()),
@@ -216,6 +219,8 @@ impl App {
                         }
                     }
                 } else {
+                    // Cancel session on unexpected message type
+                    let _ = client.cancel();
                     Err("unexpected auth message type".to_string())
                 }
             }

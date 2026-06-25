@@ -29,7 +29,7 @@ accent = "#FFA500"
 background = ""
 # ASCII 图案背景: 图案文件名(不含.txt), 空=禁用
 # 也可以用文件路径: "/path/to/pattern.txt" 或 "./my.txt"
-background_pattern = "arch"
+background_pattern = "nix"
 # 图案文件所在目录（相对或绝对路径，默认 "patterns"）
 background_pattern_dir = "patterns"
 # 图案绘制样式（建议用暗色，形成水印效果）
