@@ -88,6 +88,12 @@ pub struct Theme {
     pub accent: String,
     #[serde(default)]
     pub background: String,
+    #[serde(default)]
+    pub background_pattern: String,
+    #[serde(default = "bg_pattern_dir_default")]
+    pub background_pattern_dir: String,
+    #[serde(default = "bg_style_default")]
+    pub background_style: String,
     #[serde(default = "layout_default")]
     pub layout: String,
 }
@@ -103,6 +109,8 @@ fn sf_default() -> String { "white bold".to_string() }
 fn panel_title_default() -> String { "cyan bold".to_string() }
 fn accent_default() -> String { "#FFA500".to_string() }
 fn layout_default() -> String { "auto".to_string() }
+fn bg_pattern_dir_default() -> String { "patterns".to_string() }
+fn bg_style_default() -> String { "dark gray".to_string() }
 
 impl Default for Theme {
     fn default() -> Self {
@@ -121,6 +129,9 @@ impl Default for Theme {
             panel_title: "cyan bold".to_string(),
             accent: "#FFA500".to_string(),
             background: String::new(),
+            background_pattern: String::new(),
+            background_pattern_dir: "patterns".to_string(),
+            background_style: "dark gray".to_string(),
             layout: "auto".to_string(),
         }
     }

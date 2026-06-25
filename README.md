@@ -9,7 +9,7 @@
 - **🎨 Unicode 装饰**：圆角边框、箭头(◀▶)、图标(👤🔑⊞)、粗圆点密码(●)
 - **👁 密码可见切换**：`Ctrl+T` 切换密码明文/掩码显示
 - **📍 插件定位**：插件可声明 `position: "left"|"center"|"right"`
-- **🖼 背景填充**：可选点阵背景图案
+- **🖼 背景填充**：可选点阵背景图案 或 ASCII 艺术水印图案（`patterns/` 文件夹）
 - **🎯 渐变/强调色**：`accent` 色独立配置，聚焦时高亮明显
 
 ## 结构
@@ -18,6 +18,12 @@
 my-greeter/
 ├── Cargo.toml
 ├── config.toml         ← 配置文件
+├── patterns/           ← 背景图案文件 (.txt)
+│   ├── arch.txt        ← Arch Linux 风格
+│   ├── wave.txt        ← 波浪图案
+│   ├── hex.txt         ← 六边形网格
+│   ├── mountain.txt    ← 山脉图案
+│   └── nix.txt         ← NixOS 风格
 ├── plugins/
 │   ├── clock.py        ← 像素风时钟插件
 │   └── sysinfo.py      ← 系统信息插件
@@ -100,7 +106,10 @@ session = "dark gray"        # Session 选择器（未聚焦）
 session_focus = "white bold" # Session 选择器（聚焦时）
 panel_title = "cyan bold"    # 外层大面板标题
 accent = "#FFA500"           # 强调色（聚焦边框/标题高亮）
-background = ""              # 背景填充: ""=无, "dark gray"=灰色点阵, "none"=无
+background = ""              # 旧版点阵背景: ""=无, "dark gray"=灰色点阵, "none"=无
+background_pattern = "arch"   # ASCII 图案背景: 图案文件名(不含.txt), 空=禁用
+background_pattern_dir = "patterns"  # 图案文件目录
+background_style = "dark gray"       # 图案绘制颜色（建议暗色 = 水印效果）
 ```
 
 ### 支持的样式
@@ -114,6 +123,112 @@ background = ""              # 背景填充: ""=无, "dark gray"=灰色点阵, "
 **修饰符：** `bold`, `dim`, `italic`, `underline`
 
 组合写法：`"cyan bold"`, `"white bold"`, `"#FFA500 bold"`
+
+## 背景图案
+
+my-greeter 支持用 ASCII 艺术字符作为终端背景水印，独立于前景的登录面板。
+
+### 内置图案
+
+```
+patterns/
+├── arch.txt      ← █ Arch Linux 风格（19行, 40字符宽）
+├── hex.txt       ⬡ 六边形网格（9行, 46字符宽）
+├── mountain.txt  ▲ 山脉（19行, 77字符宽）
+├── nix.txt       ❄ NixOS 风格雪花（41行, 87字符宽）
+└── wave.txt      ≈ 波浪（33行, 66字符宽）
+```
+
+### 切换图案
+
+改 `config.toml` 的 `background_pattern` 字段即可：
+
+```toml
+[theme]
+background_pattern = "arch"      # 使用 arch.txt
+background_pattern = "hex"       # 使用 hex.txt
+background_pattern = "wave"      # 使用 wave.txt
+background_pattern = ""           # 禁用图案背景
+```
+
+### 使用自定义图案
+
+1. 在 `patterns/` 目录下新建 `.txt` 文件
+2. 写入任意 ASCII 字符图案
+3. 配置中填文件名（不含 `.txt`）
+
+```
+# 例如创建 mylogo.txt：
+patterns/
+└── mylogo.txt        ← 自定义图案
+```
+
+```toml
+background_pattern = "mylogo"
+```
+
+图案文件也可以放在其他位置，用路径指定：
+
+```toml
+background_pattern = "/home/gtlx/.config/my-greeter/custom.txt"
+background_pattern = "./dev-pattern.txt"
+background_pattern = "../shared/pattern.txt"
+```
+
+### 图案搜索路径
+
+不指定绝对路径时，按以下顺序查找 `{background_pattern_dir}/{name}.txt`：
+
+| 优先级 | 路径 |
+|--------|------|
+| 1 | 项目根目录下的 `patterns/` |
+| 2 | 当前目录下的 `patterns/` |
+| 3 | `~/.config/my-greeter/patterns/` |
+| 4 | 可执行文件同目录下的 `patterns/` |
+
+`background_pattern_dir` 也可以改为其他目录名或绝对路径：
+
+```toml
+background_pattern_dir = "my_art"          # 项目根下的 my_art/
+background_pattern_dir = "/etc/my-greeter/arts"  # 绝对路径
+```
+
+### 调整水印颜色
+
+```toml
+background_style = "dark gray"     # 暗灰色，最不明显
+background_style = "gray"          # 灰色，隐约可见
+background_style = "light blue"    # 浅蓝色
+background_style = "dark gray bold"  # 暗灰色加粗
+background_style = "#1a1a2e"       # 深色 hex 色
+background_style = ""               # 默认白色（较明显）
+```
+
+建议使用 `dark gray` 或自定义深色，形成**水印暗纹**效果。
+
+### 渲染行为
+
+- 背景图案**先绘制**，登录面板和输入框**后绘制**（覆盖在背景之上）
+- 图案**垂直居中**于终端
+- 图案宽于终端时**居中截取**可见部分
+- 图案窄于终端时**居中对齐**，两侧补空白
+- 图案高度超过终端时**从底部截取**
+- 图案找不到或禁用时，**回退到旧版点阵背景**（`background` 字段）
+
+### 示例效果示意
+
+```
+┌──────────────────────────────┐  ← 登录面板覆盖在背景上
+│       ┌──── Login ───────┐   │
+│       │  ◀ ⊞ sway ▶      │   │
+│       │  gtlx             │   │
+│       │  ●●●●●●●          │   │
+│       └──────────────────┘   │
+│                              │
+│  ░░░░░  ░░░  ░░░  ░░░  ░░░  │  ← 背景水印隐约透出
+│    ░      ░    ░    ░    ░    │
+└──────────────────────────────┘
+```
 
 ## 操作
 

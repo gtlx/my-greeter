@@ -25,5 +25,12 @@ session = "dark gray"
 session_focus = "white bold"
 panel_title = "cyan bold"
 accent = "#FFA500"
-# 背景填充: ""=无, "dark gray"=灰色点阵, "none"=无
+# 旧版点阵背景: ""=无, "dark gray"=灰色点阵, "none"=无
 background = ""
+# ASCII 图案背景: 图案文件名(不含.txt), 空=禁用
+# 也可以用文件路径: "/path/to/pattern.txt" 或 "./my.txt"
+background_pattern = "arch"
+# 图案文件所在目录（相对或绝对路径，默认 "patterns"）
+background_pattern_dir = "patterns"
+# 图案绘制样式（建议用暗色，形成水印效果）
+background_style = "dark gray"

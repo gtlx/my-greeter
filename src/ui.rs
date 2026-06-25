@@ -7,6 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
+use std::path::PathBuf;
 
 const BULLET: &str = "*";
 const CURSOR: &str = "▌";
@@ -25,13 +26,90 @@ fn rounded_block<'a>(title: &str, style: Style) -> Block<'a> {
         .border_type(BorderType::Rounded)
 }
 
+/// 搜索图案文件路径
+/// `name`: 图案名（自动补 .txt）或直接的文件路径
+/// `dir`: 图案目录（相对或绝对路径）
+fn find_pattern_file(name: &str, dir: &str) -> Option<PathBuf> {
+    // 如果 name 本身就是文件路径，直接检查
+    let name_path = PathBuf::from(name);
+    if name_path.is_absolute() || name.starts_with("./") || name.starts_with("../") || name.contains('/') {
+        let path = if name.ends_with(".txt") {
+            name_path
+        } else {
+            let mut p = name_path;
+            p.set_extension("txt");
+            p
+        };
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let filename = if name.ends_with(".txt") {
+        name.to_string()
+    } else {
+        format!("{}.txt", name)
+    };
+
+    // 构建搜索目录列表
+    let mut search_dirs: Vec<PathBuf> = Vec::new();
+
+    // 如果 dir 是绝对路径，直接用它
+    let dir_path = PathBuf::from(dir);
+    if dir_path.is_absolute() {
+        search_dirs.push(dir_path.clone());
+    } else {
+        // 项目根目录
+        if let Some(root) = crate::config::project_root() {
+            search_dirs.push(root.join(&dir));
+        }
+        // 当前目录
+        search_dirs.push(PathBuf::from(".").join(&dir));
+        // XDG config 目录
+        if let Ok(home) = std::env::var("HOME") {
+            search_dirs.push(PathBuf::from(home).join(".config/my-greeter").join(&dir));
+        }
+        // 可执行文件所在目录
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                search_dirs.push(parent.join(&dir));
+            }
+        }
+    }
+
+    for base in &search_dirs {
+        let path = base.join(&filename);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// 加载图案文件，返回行数组
+fn load_pattern(name: &str, dir: &str) -> Option<Vec<String>> {
+    let path = find_pattern_file(name, dir)?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    if lines.is_empty() { None } else { Some(lines) }
+}
+
 /// 绘制背景填充
-fn render_background(f: &mut Frame, area: Rect, pattern: &str) {
-    if pattern.is_empty() || pattern == "none" {
+fn render_background(f: &mut Frame, area: Rect, th: &crate::config::Theme) {
+    // 1. 优先加载图案背景
+    if !th.background_pattern.is_empty() && th.background_pattern != "none" {
+        if let Some(pattern_lines) = load_pattern(&th.background_pattern, &th.background_pattern_dir) {
+            let bg_style = config::parse_style(&th.background_style);
+            render_pattern_background(f, area, &pattern_lines, bg_style);
+            return;
+        }
+    }
+
+    // 2. 降级到旧版点阵模式
+    if th.background.is_empty() || th.background == "none" {
         return;
     }
-    let bg_style = config::parse_style(pattern);
-    // Use a subtle dotted pattern
+    let bg_style = config::parse_style(&th.background);
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
             if (x + y) % 3 == 0 {
@@ -40,6 +118,56 @@ fn render_background(f: &mut Frame, area: Rect, pattern: &str) {
                 f.render_widget(c, Rect::new(x, y, 1, 1));
             }
         }
+    }
+}
+
+/// 绘制 ASCII 图案背景（平铺或居中）
+fn render_pattern_background(f: &mut Frame, area: Rect, lines: &[String], style: Style) {
+    if lines.is_empty() {
+        return;
+    }
+
+    let pattern_h = lines.len() as u16;
+
+    // 垂直居中
+    let start_y = if area.height > pattern_h {
+        (area.height - pattern_h) / 2
+    } else {
+        0
+    };
+
+    // 如果图案高度超过终端高度，从底部截取
+    let visible_lines: &[String] = if pattern_h as u16 > area.height {
+        &lines[(pattern_h as usize).saturating_sub(area.height as usize)..]
+    } else {
+        lines
+    };
+
+    for (i, line) in visible_lines.iter().enumerate() {
+        let y = start_y + i as u16;
+        if y >= area.bottom() {
+            break;
+        }
+
+        let display: String = if line.len() as u16 >= area.width {
+            // 长于终端宽度 → 居中截取中间部分
+            let start = ((line.len() as u16) - area.width) / 2;
+            let end = start + area.width;
+            line[start as usize..end as usize].to_string()
+        } else {
+            // 窄于终端宽度 → 居中对齐（两侧补空格）
+            let pad_left = (area.width - line.len() as u16) / 2;
+            let pad_right = area.width as usize - pad_left as usize - line.len();
+            format!(
+                "{}{}{}",
+                " ".repeat(pad_left as usize),
+                line,
+                " ".repeat(pad_right)
+            )
+        };
+
+        let p = Paragraph::new(Line::from(Span::styled(display, style)));
+        f.render_widget(p, Rect::new(area.x, y, area.width, 1));
     }
 }
 
@@ -89,8 +217,8 @@ pub fn render(f: &mut Frame, app: &App) {
     let sep_st = config::parse_style(&th.separator);
     let title_st = config::parse_style(&th.title);
 
-    // 背景填充
-    render_background(f, area, &th.background);
+    // 背景填充（支持点阵和 ASCII 图案）
+    render_background(f, area, th);
 
     // ── 自适应布局：宽屏水平分栏(≥80)，窄屏垂直堆叠 ──
     let use_horizontal = match th.layout.as_str() {
